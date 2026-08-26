@@ -31,7 +31,12 @@ export interface ChatUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  completion_tokens_details?: {
+    reasoning_tokens?: number;
+  };
 }
+
+export type ReasoningEffort = "none" | "low" | "medium" | "high";
 
 export interface ChatCompletionResult {
   id: string;
@@ -209,6 +214,7 @@ export class OpenRouterClient {
     maxTokens?: number;
     temperature?: number;
     jsonMode?: boolean;
+    reasoningEffort?: ReasoningEffort;
   }): Promise<ChatCompletionResult> {
     interface RawResponse {
       id: string;
@@ -228,6 +234,12 @@ export class OpenRouterClient {
     }
     if (params.temperature !== undefined) body.temperature = params.temperature;
     if (params.jsonMode) body.response_format = { type: "json_object" };
+    if (params.reasoningEffort) {
+      body.reasoning =
+        params.reasoningEffort === "none"
+          ? { enabled: false }
+          : { effort: params.reasoningEffort };
+    }
 
     const raw = await this.request<RawResponse>("/chat/completions", {
       method: "POST",

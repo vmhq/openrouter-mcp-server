@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { ServerConfig } from "./config.js";
 import {
+  ChatCompletionResult,
   OpenRouterClient,
   OpenRouterError,
   OpenRouterModel,
@@ -65,19 +66,45 @@ function summariesToMarkdown(rows: ModelSummary[]): string {
   return lines.join("\n");
 }
 
-function usageAndCost(
-  model: OpenRouterModel,
-  result: { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }
-) {
+function usageAndCost(model: OpenRouterModel, result: ChatCompletionResult) {
   const cost = estimateCostUsd(model, result.usage);
+  const reasoningTokens =
+    result.usage?.completion_tokens_details?.reasoning_tokens;
   return {
     usage: {
       prompt_tokens: result.usage?.prompt_tokens ?? 0,
       completion_tokens: result.usage?.completion_tokens ?? 0,
       total_tokens: result.usage?.total_tokens ?? 0,
+      ...(reasoningTokens !== undefined
+        ? { reasoning_tokens: reasoningTokens }
+        : {}),
     },
     estimated_cost_usd: cost !== undefined ? round(cost, 6) : undefined,
   };
+}
+
+/**
+ * Reasoning models spend max_tokens on internal chain-of-thought first; with a
+ * small cap they hit "length" having produced no visible text. Surface that as
+ * an actionable error instead of returning a silently empty response.
+ */
+function emptyByLengthError(
+  modelId: string,
+  result: ChatCompletionResult
+): string | undefined {
+  if (result.content.trim() !== "" || result.finishReason !== "length") {
+    return undefined;
+  }
+  const reasoning =
+    result.usage?.completion_tokens_details?.reasoning_tokens ??
+    result.usage?.completion_tokens ??
+    0;
+  return (
+    `Model '${modelId}' returned no visible text: it spent the whole max_tokens budget` +
+    ` (${reasoning} tokens) on internal reasoning before being cut off (finish_reason "length").` +
+    ` Retry with a much higher max_tokens (>= 1500-2000 even for short outputs),` +
+    ` set reasoning_effort to "low" or "none", or pick a non-reasoning model.`
+  );
 }
 
 export function registerTools(
@@ -292,11 +319,12 @@ Args:
   - model (string, optional): exact model id. Falls back to DEFAULT_MODEL from .env; errors if neither is set.
   - task (string): the prompt for the delegated model. Include ALL context it needs — it does not see this conversation.
   - system_prompt (string, optional): system instructions for the delegated model.
-  - max_tokens (integer, optional): completion token cap (also caps cost).
+  - max_tokens (integer, optional): completion token cap (also caps cost). NOTE: on reasoning models this cap INCLUDES internal chain-of-thought tokens — budget >= 1500-2000 even for short outputs, or lower reasoning_effort.
+  - reasoning_effort ("none" | "low" | "medium" | "high", optional): reasoning budget for reasoning-capable models ("none" disables it). Ignored by models without reasoning support.
   - temperature (0-2, optional).
   - json_mode (boolean, default false): request a JSON-object response (only for models supporting response_format).
 
-Returns: {model_used, response, finish_reason, usage:{prompt_tokens, completion_tokens, total_tokens}, estimated_cost_usd}.`,
+Returns: {model_used, response, finish_reason, usage:{prompt_tokens, completion_tokens, total_tokens, reasoning_tokens?}, estimated_cost_usd}.`,
       inputSchema: {
         model: z
           .string()
@@ -310,6 +338,7 @@ Returns: {model_used, response, finish_reason, usage:{prompt_tokens, completion_
           .describe("Self-contained prompt for the delegated model"),
         system_prompt: z.string().max(50_000).optional(),
         max_tokens: z.number().int().min(1).max(200_000).optional(),
+        reasoning_effort: z.enum(["none", "low", "medium", "high"]).optional(),
         temperature: z.number().min(0).max(2).optional(),
         json_mode: z.boolean().default(false),
       },
@@ -356,7 +385,11 @@ Returns: {model_used, response, finish_reason, usage:{prompt_tokens, completion_
           maxTokens: params.max_tokens,
           temperature: params.temperature,
           jsonMode: params.json_mode,
+          reasoningEffort: params.reasoning_effort,
         });
+
+        const lengthError = emptyByLengthError(modelId, result);
+        if (lengthError) return errorResult(lengthError);
 
         const output = {
           model_used: result.model || modelId,
@@ -395,7 +428,7 @@ Args:
   - tier ("economy" | "balanced" | "quality", default "economy").
   - require_tools (boolean, default false): restrict to models with tool/function calling.
   - min_context (integer, default 16000): minimum context window in tokens.
-  - system_prompt, max_tokens, temperature: same as openrouter_delegate_task.
+  - system_prompt, max_tokens, reasoning_effort, temperature: same as openrouter_delegate_task. On reasoning models max_tokens INCLUDES internal chain-of-thought — budget >= 1500-2000 even for short outputs, or lower reasoning_effort.
 
 Returns: {model_used, selection_reason, runners_up, response, finish_reason, usage, estimated_cost_usd}.`,
       inputSchema: {
@@ -405,6 +438,7 @@ Returns: {model_used, selection_reason, runners_up, response, finish_reason, usa
         min_context: z.number().int().min(0).default(16_000),
         system_prompt: z.string().max(50_000).optional(),
         max_tokens: z.number().int().min(1).max(200_000).optional(),
+        reasoning_effort: z.enum(["none", "low", "medium", "high"]).optional(),
         temperature: z.number().min(0).max(2).optional(),
       },
       annotations: {
@@ -455,6 +489,7 @@ Returns: {model_used, selection_reason, runners_up, response, finish_reason, usa
               messages,
               maxTokens: params.max_tokens,
               temperature: params.temperature,
+              reasoningEffort: params.reasoning_effort,
             });
             usedModel = models.find((m) => m.id === id) ?? pick.model;
             if (i > 0) {
@@ -474,6 +509,9 @@ Returns: {model_used, selection_reason, runners_up, response, finish_reason, usa
             "No candidate model has endpoints matching your OpenRouter data policy (see openrouter.ai/settings/privacy)."
           );
         }
+
+        const lengthError = emptyByLengthError(usedModel.id, result);
+        if (lengthError) return errorResult(lengthError);
 
         const output = {
           model_used: usedModel.id,
