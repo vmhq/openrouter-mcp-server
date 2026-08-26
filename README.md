@@ -30,6 +30,8 @@ Ver [.env.example](.env.example) — las principales:
 | `OPENROUTER_API_KEY` | **Requerida.** Tu key de https://openrouter.ai/keys |
 | `PORT` | Puerto HTTP (default 3000) |
 | `MCP_AUTH_TOKEN` | Si se define, los clientes deben enviar `Authorization: Bearer <token>`. **Obligatorio en la práctica si expones el servidor fuera de localhost.** |
+| `MCP_PUBLIC_URL` | URL pública del servidor (ej. `https://mcp.example.com`); necesaria para el flujo OAuth detrás de un reverse proxy |
+| `POCKETID_ISSUER` / `POCKETID_CLIENT_ID` / `POCKETID_CLIENT_SECRET` | Habilitan el login OAuth interactivo delegando la autenticación a tu instancia [PocketID](https://pocket-id.org) (ver más abajo) |
 | `DEFAULT_MODEL` | Modelo usado por `openrouter_delegate_task` si el agente no especifica uno |
 | `MAX_PROMPT_PRICE_PER_M` / `MAX_COMPLETION_PRICE_PER_M` | Techo de precio (USD/M tokens); modelos más caros se rechazan |
 | `ALLOWED_MODELS` / `BLOCKED_MODELS` | Listas separadas por comas: ids exactos o prefijos (`openai/`) |
@@ -66,7 +68,25 @@ claude mcp add --transport http openrouter http://TU_HOST:3000/mcp --header "Aut
 
 **Cualquier cliente MCP**: apunta al endpoint `POST /mcp` con transporte "streamable HTTP". Hay un endpoint `GET /health` para monitoreo.
 
-**claude.ai (conector remoto)**: necesita una URL pública HTTPS — despliega el servidor en un VPS detrás de un reverse proxy (Caddy/nginx) o usa un túnel (p. ej. `cloudflared tunnel`).
+**claude.ai (conector remoto)**: necesita una URL pública HTTPS — despliega el servidor en un VPS detrás de un reverse proxy (Caddy/nginx) o usa un túnel (p. ej. `cloudflared tunnel`). Con OAuth habilitado (ver abajo), agrega el conector apuntando a `https://TU_HOST/mcp` y deja vacíos los campos avanzados de OAuth Client ID/Secret: el servidor publica metadatos OAuth y soporta Dynamic Client Registration, así que Claude se registra y obtiene su token automáticamente al pulsar **Authorize**.
+
+## OAuth con PocketID
+
+El servidor implementa OAuth 2.1 completo para agentes de IA (Claude, Cursor, …): actúa como **authorization server** hacia los clientes MCP (RFC 7591 Dynamic Client Registration + PKCE S256 + emisión de tokens propios, con metadatos RFC 8414/9728) y delega el **login humano** a tu instancia [PocketID](https://pocket-id.org) vía OIDC (passkey).
+
+Flujo: el cliente MCP recibe un `401` con `WWW-Authenticate` → descubre los metadatos en `/.well-known/oauth-protected-resource` → se registra en `/oauth/register` → abre `/oauth/authorize` en el navegador → el usuario inicia sesión en PocketID con su passkey → PocketID vuelve a `/oauth/callback` → el servidor emite su propio código y el cliente lo canjea en `/oauth/token` por un access token (30 días por defecto).
+
+Configuración:
+
+1. En PocketID, crea un **cliente OIDC** nuevo.
+2. Registra el callback: `<MCP_PUBLIC_URL>/oauth/callback`.
+3. Restringe quién puede iniciar sesión con los **grupos permitidos** del cliente OIDC en PocketID.
+4. Copia el Client ID y el Client Secret a `POCKETID_CLIENT_ID` / `POCKETID_CLIENT_SECRET`, y pon la URL base de PocketID en `POCKETID_ISSUER`.
+5. Define `MCP_PUBLIC_URL` con la URL pública HTTPS del servidor.
+
+Si las variables `POCKETID_*` no están definidas, el flujo interactivo `/oauth/authorize` muestra un error; el bearer estático `MCP_AUTH_TOKEN` sigue funcionando en paralelo para acceso máquina-a-máquina (curl, Codex, etc.).
+
+El estado OAuth (clientes registrados, códigos de un solo uso y hashes SHA-256 de los tokens — nunca los tokens en claro) se persiste en `./data/oauth-state.json` (configurable con `MCP_OAUTH_STATE_PATH`). Si tras un reinicio con estado borrado el conector falla, elimínalo en Claude y agrégalo de nuevo para que se re-registre.
 
 ## Cómo elige modelo `openrouter_auto_delegate`
 
