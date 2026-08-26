@@ -1,0 +1,6 @@
+// Auto-generated: OpenRouter logo (from @lobehub/icons-static-svg) embedded as a data URI
+// so MCP clients can render it without fetching a cross-origin URL.
+export const OPENROUTER_ICON_DATA_URI =
+  "data:image/svg+xml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHRpdGxlPk9wZW5Sb3V0ZXI8L3RpdGxlPjxwYXRoIGQ9Ik0xOC42NTQgMy44N2E1LjA4NyA1LjA4NyAwIDExMCAxMC4xNzRMMjMuNyAxOS4wOWMuNjQuNjQxLjE4NyAxLjczNy0uNzIgMS43MzdIOC40OGE4LjQ3OSA4LjQ3OSAwIDAxMC0xNi45NThoMTAuMTc1ek04LjQ3OSA3LjI2YTUuMDg3IDUuMDg3IDAgMTAwIDEwLjE3NiA1LjA4NyA1LjA4NyAwIDAwMC0xMC4xNzV6IiBmaWxsPSIjQzhGRjAwIj48L3BhdGg+PC9zdmc+";
+export const OPENROUTER_ICON_CDN_URL =
+  "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/openrouter-color.svg";
