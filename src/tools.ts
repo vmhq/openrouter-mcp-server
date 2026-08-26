@@ -323,6 +323,8 @@ Args:
   - reasoning_effort ("none" | "low" | "medium" | "high", optional): reasoning budget for reasoning-capable models ("none" disables it). Ignored by models without reasoning support.
   - temperature (0-2, optional).
   - json_mode (boolean, default false): request a JSON-object response (only for models supporting response_format).
+  - web_search (boolean, default false): let OpenRouter run a web search and inject the results into the prompt (works with any model). Costs ~$4 per 1000 results EXTRA, billed separately and NOT included in estimated_cost_usd; injected results also add prompt tokens.
+  - web_max_results (1-10, default 5): number of search results when web_search is on.
 
 Returns: {model_used, response, finish_reason, usage:{prompt_tokens, completion_tokens, total_tokens, reasoning_tokens?}, estimated_cost_usd}.`,
       inputSchema: {
@@ -341,6 +343,8 @@ Returns: {model_used, response, finish_reason, usage:{prompt_tokens, completion_
         reasoning_effort: z.enum(["none", "low", "medium", "high"]).optional(),
         temperature: z.number().min(0).max(2).optional(),
         json_mode: z.boolean().default(false),
+        web_search: z.boolean().default(false),
+        web_max_results: z.number().int().min(1).max(10).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -386,6 +390,8 @@ Returns: {model_used, response, finish_reason, usage:{prompt_tokens, completion_
           temperature: params.temperature,
           jsonMode: params.json_mode,
           reasoningEffort: params.reasoning_effort,
+          webSearch: params.web_search,
+          webMaxResults: params.web_max_results,
         });
 
         const lengthError = emptyByLengthError(modelId, result);
@@ -428,7 +434,7 @@ Args:
   - tier ("economy" | "balanced" | "quality", default "economy").
   - require_tools (boolean, default false): restrict to models with tool/function calling.
   - min_context (integer, default 16000): minimum context window in tokens.
-  - system_prompt, max_tokens, reasoning_effort, temperature: same as openrouter_delegate_task. On reasoning models max_tokens INCLUDES internal chain-of-thought — budget >= 1500-2000 even for short outputs, or lower reasoning_effort.
+  - system_prompt, max_tokens, reasoning_effort, temperature, web_search, web_max_results: same as openrouter_delegate_task. On reasoning models max_tokens INCLUDES internal chain-of-thought — budget >= 1500-2000 even for short outputs, or lower reasoning_effort. web_search costs extra (~$4/1000 results, not in estimated_cost_usd).
 
 Returns: {model_used, selection_reason, runners_up, response, finish_reason, usage, estimated_cost_usd}.`,
       inputSchema: {
@@ -440,6 +446,8 @@ Returns: {model_used, selection_reason, runners_up, response, finish_reason, usa
         max_tokens: z.number().int().min(1).max(200_000).optional(),
         reasoning_effort: z.enum(["none", "low", "medium", "high"]).optional(),
         temperature: z.number().min(0).max(2).optional(),
+        web_search: z.boolean().default(false),
+        web_max_results: z.number().int().min(1).max(10).optional(),
       },
       annotations: {
         readOnlyHint: false,
@@ -490,6 +498,8 @@ Returns: {model_used, selection_reason, runners_up, response, finish_reason, usa
               maxTokens: params.max_tokens,
               temperature: params.temperature,
               reasoningEffort: params.reasoning_effort,
+              webSearch: params.web_search,
+              webMaxResults: params.web_max_results,
             });
             usedModel = models.find((m) => m.id === id) ?? pick.model;
             if (i > 0) {

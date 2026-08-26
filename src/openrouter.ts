@@ -215,6 +215,8 @@ export class OpenRouterClient {
     temperature?: number;
     jsonMode?: boolean;
     reasoningEffort?: ReasoningEffort;
+    webSearch?: boolean;
+    webMaxResults?: number;
   }): Promise<ChatCompletionResult> {
     interface RawResponse {
       id: string;
@@ -239,6 +241,16 @@ export class OpenRouterClient {
         params.reasoningEffort === "none"
           ? { enabled: false }
           : { effort: params.reasoningEffort };
+    }
+    if (params.webSearch) {
+      body.plugins = [
+        {
+          id: "web",
+          ...(params.webMaxResults !== undefined
+            ? { max_results: params.webMaxResults }
+            : {}),
+        },
+      ];
     }
 
     const raw = await this.request<RawResponse>("/chat/completions", {
