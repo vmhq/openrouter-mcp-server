@@ -17,10 +17,21 @@ function parseOptionalNumber(value: string | undefined): number | undefined {
   return n;
 }
 
+export interface PocketIdSettings {
+  issuer: string;
+  clientId: string;
+  clientSecret: string;
+  scopes: string[];
+}
+
 export interface ServerConfig {
   openRouterApiKey: string;
   port: number;
   mcpAuthToken?: string;
+  /** Public base URL of this server (e.g. https://mcp.example.com). */
+  publicUrl?: string;
+  /** PocketID OIDC identity provider for the interactive OAuth flow. */
+  pocketId?: PocketIdSettings;
   appUrl?: string;
   appTitle?: string;
   defaultModel?: string;
@@ -45,10 +56,28 @@ export function loadConfig(): ServerConfig {
     process.exit(1);
   }
 
+  // PocketID identity provider: only enabled when all three vars are set.
+  const pocketIdIssuer = (process.env.POCKETID_ISSUER || "").replace(/\/$/, "");
+  const pocketIdClientId = process.env.POCKETID_CLIENT_ID || "";
+  const pocketIdClientSecret = process.env.POCKETID_CLIENT_SECRET || "";
+  const pocketId: PocketIdSettings | undefined =
+    pocketIdIssuer && pocketIdClientId && pocketIdClientSecret
+      ? {
+          issuer: pocketIdIssuer,
+          clientId: pocketIdClientId,
+          clientSecret: pocketIdClientSecret,
+          scopes: (process.env.POCKETID_SCOPES || "openid profile email")
+            .split(/\s+/)
+            .filter(Boolean),
+        }
+      : undefined;
+
   return {
     openRouterApiKey: apiKey,
     port: parseOptionalNumber(process.env.PORT) ?? 3000,
     mcpAuthToken: process.env.MCP_AUTH_TOKEN || undefined,
+    publicUrl: process.env.MCP_PUBLIC_URL?.replace(/\/$/, "") || undefined,
+    pocketId,
     appUrl: process.env.APP_URL || undefined,
     appTitle: process.env.APP_TITLE || undefined,
     defaultModel: process.env.DEFAULT_MODEL || undefined,
