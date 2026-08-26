@@ -155,7 +155,7 @@ export class OpenRouterClient {
       const hints: Record<number, string> = {
         401: "Check that OPENROUTER_API_KEY in .env is valid.",
         402: "Insufficient OpenRouter credits. Top up at https://openrouter.ai/credits.",
-        404: "Model not found. Use openrouter_list_models to see valid model ids.",
+        404: "Model not found, or no endpoints match your account's data policy (e.g. ZDR — see openrouter.ai/settings/privacy). Use openrouter_list_models to see valid model ids.",
         429: "Rate limited by OpenRouter. Wait a moment or use a paid (non :free) model.",
       };
       throw new OpenRouterError(
@@ -178,9 +178,22 @@ export class OpenRouterClient {
     ) {
       return this.modelsCache.models;
     }
-    const data = await this.request<{ data: OpenRouterModel[] }>("/models", {
-      timeoutMs: 30_000,
-    });
+    // /models/user is the catalog filtered by the account's provider
+    // preferences and data policy (e.g. ZDR); models it omits would 404 at
+    // completion time anyway. Fall back to the public catalog if unavailable.
+    let data: { data: OpenRouterModel[] };
+    try {
+      data = await this.request<{ data: OpenRouterModel[] }>("/models/user", {
+        timeoutMs: 30_000,
+      });
+      if (!Array.isArray(data.data) || data.data.length === 0) {
+        throw new OpenRouterError("empty /models/user response");
+      }
+    } catch {
+      data = await this.request<{ data: OpenRouterModel[] }>("/models", {
+        timeoutMs: 30_000,
+      });
+    }
     this.modelsCache = { models: data.data, fetchedAt: now };
     return data.data;
   }

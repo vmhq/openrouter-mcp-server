@@ -438,21 +438,51 @@ Returns: {model_used, selection_reason, runners_up, response, finish_reason, usa
         }
         messages.push({ role: "user", content: params.task });
 
-        const result = await client.chatCompletion({
-          model: pick.model.id,
-          messages,
-          maxTokens: params.max_tokens,
-          temperature: params.temperature,
-        });
+        // A 404 here means the model has no endpoints compatible with the
+        // account's data policy (e.g. ZDR); try the runners-up before failing.
+        const candidateIds = [
+          pick.model.id,
+          ...pick.runnersUp.map((r) => r.id),
+        ];
+        let result;
+        let usedModel = pick.model;
+        let fallbackNote = "";
+        for (let i = 0; i < candidateIds.length; i++) {
+          const id = candidateIds[i];
+          try {
+            result = await client.chatCompletion({
+              model: id,
+              messages,
+              maxTokens: params.max_tokens,
+              temperature: params.temperature,
+            });
+            usedModel = models.find((m) => m.id === id) ?? pick.model;
+            if (i > 0) {
+              fallbackNote = `; '${candidateIds[0]}' had no endpoints matching the account's data policy, fell back to runner-up '${id}'`;
+            }
+            break;
+          } catch (err) {
+            const retriable =
+              err instanceof OpenRouterError &&
+              err.status === 404 &&
+              i < candidateIds.length - 1;
+            if (!retriable) throw err;
+          }
+        }
+        if (!result) {
+          return errorResult(
+            "No candidate model has endpoints matching your OpenRouter data policy (see openrouter.ai/settings/privacy)."
+          );
+        }
 
         const output = {
-          model_used: pick.model.id,
-          selection_reason: pick.reason,
+          model_used: usedModel.id,
+          selection_reason: pick.reason + fallbackNote,
           candidates_considered: pick.candidatesConsidered,
           runners_up: pick.runnersUp,
           response: result.content,
           finish_reason: result.finishReason ?? "unknown",
-          ...usageAndCost(pick.model, result),
+          ...usageAndCost(usedModel, result),
         };
         return {
           content: [
