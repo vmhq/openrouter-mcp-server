@@ -17,6 +17,13 @@ function parseOptionalNumber(value: string | undefined): number | undefined {
   return n;
 }
 
+function normalizePublicUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim().replace(/\/$/, "");
+  if (!trimmed) return undefined;
+  // OAuth discovery URLs must be absolute; assume https when no scheme given.
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 export interface PocketIdSettings {
   issuer: string;
   clientId: string;
@@ -76,7 +83,7 @@ export function loadConfig(): ServerConfig {
     openRouterApiKey: apiKey,
     port: parseOptionalNumber(process.env.PORT) ?? 3000,
     mcpAuthToken: process.env.MCP_AUTH_TOKEN || undefined,
-    publicUrl: process.env.MCP_PUBLIC_URL?.replace(/\/$/, "") || undefined,
+    publicUrl: normalizePublicUrl(process.env.MCP_PUBLIC_URL),
     pocketId,
     appUrl: process.env.APP_URL || undefined,
     appTitle: process.env.APP_TITLE || undefined,
