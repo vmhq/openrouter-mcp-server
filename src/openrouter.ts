@@ -1,7 +1,5 @@
 import type { ServerConfig } from "./config.js";
 
-const API_BASE = "https://openrouter.ai/api/v1";
-
 // ---------- Types (subset of the OpenRouter API we use) ----------
 
 export interface OpenRouterModel {
@@ -37,6 +35,22 @@ export interface ChatUsage {
 }
 
 export type ReasoningEffort = "none" | "low" | "medium" | "high";
+
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+export interface ChatCompletionParams {
+  model: string;
+  messages: ChatMessage[];
+  maxTokens?: number;
+  temperature?: number;
+  jsonMode?: boolean;
+  reasoningEffort?: ReasoningEffort;
+  webSearch?: boolean;
+  webMaxResults?: number;
+}
 
 export interface ChatCompletionResult {
   id: string;
@@ -92,6 +106,10 @@ export function estimateCostUsd(
   return promptCost + completionCost;
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function round(n: number, decimals = 4): number {
   const f = 10 ** decimals;
   return Math.round(n * f) / f;
@@ -102,6 +120,8 @@ export function round(n: number, decimals = 4): number {
 export class OpenRouterClient {
   private modelsCache: { models: OpenRouterModel[]; fetchedAt: number } | null =
     null;
+  /** De-duplicates concurrent catalog refreshes across parallel MCP requests. */
+  private modelsInFlight: Promise<OpenRouterModel[]> | null = null;
 
   constructor(private cfg: ServerConfig) {}
 
@@ -115,7 +135,33 @@ export class OpenRouterClient {
     return h;
   }
 
+  /**
+   * Transient failures (rate limits, provider hiccups) are retried with
+   * exponential backoff; the completions endpoint is not billed for a failed
+   * request, so a retry is safe.
+   */
   private async request<T>(
+    path: string,
+    init?: { method?: string; body?: unknown; timeoutMs?: number; retries?: number }
+  ): Promise<T> {
+    const maxAttempts = (init?.retries ?? 2) + 1;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.requestOnce<T>(path, init);
+      } catch (err) {
+        lastError = err;
+        const retriable =
+          err instanceof OpenRouterError &&
+          (err.status === 429 || (err.status !== undefined && err.status >= 500));
+        if (!retriable || attempt === maxAttempts) throw err;
+        await delay(400 * 2 ** (attempt - 1) + Math.floor(Math.random() * 200));
+      }
+    }
+    throw lastError;
+  }
+
+  private async requestOnce<T>(
     path: string,
     init?: { method?: string; body?: unknown; timeoutMs?: number }
   ): Promise<T> {
@@ -126,7 +172,7 @@ export class OpenRouterClient {
     );
     let res: Response;
     try {
-      res = await fetch(`${API_BASE}${path}`, {
+      res = await fetch(`${this.cfg.openRouterBaseUrl}${path}`, {
         method: init?.method ?? "GET",
         headers: this.headers(),
         body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
@@ -183,6 +229,14 @@ export class OpenRouterClient {
     ) {
       return this.modelsCache.models;
     }
+    if (this.modelsInFlight) return this.modelsInFlight;
+    this.modelsInFlight = this.fetchModels().finally(() => {
+      this.modelsInFlight = null;
+    });
+    return this.modelsInFlight;
+  }
+
+  private async fetchModels(): Promise<OpenRouterModel[]> {
     // /models/user is the catalog filtered by the account's provider
     // preferences and data policy (e.g. ZDR); models it omits would 404 at
     // completion time anyway. Fall back to the public catalog if unavailable.
@@ -190,6 +244,7 @@ export class OpenRouterClient {
     try {
       data = await this.request<{ data: OpenRouterModel[] }>("/models/user", {
         timeoutMs: 30_000,
+        retries: 0, // a failure here just means falling back to /models
       });
       if (!Array.isArray(data.data) || data.data.length === 0) {
         throw new OpenRouterError("empty /models/user response");
@@ -199,7 +254,7 @@ export class OpenRouterClient {
         timeoutMs: 30_000,
       });
     }
-    this.modelsCache = { models: data.data, fetchedAt: now };
+    this.modelsCache = { models: data.data, fetchedAt: Date.now() };
     return data.data;
   }
 
@@ -208,16 +263,9 @@ export class OpenRouterClient {
     return models.find((m) => m.id === id);
   }
 
-  async chatCompletion(params: {
-    model: string;
-    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-    maxTokens?: number;
-    temperature?: number;
-    jsonMode?: boolean;
-    reasoningEffort?: ReasoningEffort;
-    webSearch?: boolean;
-    webMaxResults?: number;
-  }): Promise<ChatCompletionResult> {
+  async chatCompletion(
+    params: ChatCompletionParams
+  ): Promise<ChatCompletionResult> {
     interface RawResponse {
       id: string;
       model: string;
@@ -231,9 +279,10 @@ export class OpenRouterClient {
       model: params.model,
       messages: params.messages,
     };
-    if (params.maxTokens !== undefined) {
-      body.max_completion_tokens = params.maxTokens;
-    }
+    // OpenRouter's documented completion cap; it normalizes the value to
+    // whatever the upstream provider expects (max_completion_tokens on the
+    // OpenAI reasoning models, and so on).
+    if (params.maxTokens !== undefined) body.max_tokens = params.maxTokens;
     if (params.temperature !== undefined) body.temperature = params.temperature;
     if (params.jsonMode) body.response_format = { type: "json_object" };
     if (params.reasoningEffort) {
