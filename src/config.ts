@@ -33,6 +33,8 @@ export interface PocketIdSettings {
 
 export interface ServerConfig {
   openRouterApiKey: string;
+  /** OpenRouter API base; override to point at a proxy or gateway. */
+  openRouterBaseUrl: string;
   port: number;
   mcpAuthToken?: string;
   /** Public base URL of this server (e.g. https://mcp.example.com). */
@@ -52,6 +54,16 @@ export interface ServerConfig {
   tierBalancedMaxPrice: number;
   tierQualityMaxPrice: number;
   modelsCacheTtlMs: number;
+  /** Completion budget used when the caller does not pass max_tokens. */
+  defaultMaxTokens: number;
+  /** Floor applied to reasoning models, whose budget is eaten by CoT first. */
+  reasoningMinMaxTokens: number;
+  /** Hard ceiling for one delegation, summed across auto-continuations. */
+  maxOutputTokens: number;
+  /** How many times a truncated answer may be auto-continued. */
+  maxContinuations: number;
+  /** Max characters returned inline in a tool result before paging kicks in. */
+  maxResponseChars: number;
 }
 
 export function loadConfig(): ServerConfig {
@@ -81,6 +93,9 @@ export function loadConfig(): ServerConfig {
 
   return {
     openRouterApiKey: apiKey,
+    openRouterBaseUrl: (
+      process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1"
+    ).replace(/\/$/, ""),
     port: parseOptionalNumber(process.env.PORT) ?? 3000,
     mcpAuthToken: process.env.MCP_AUTH_TOKEN || undefined,
     publicUrl: normalizePublicUrl(process.env.MCP_PUBLIC_URL),
@@ -108,5 +123,13 @@ export function loadConfig(): ServerConfig {
       parseOptionalNumber(process.env.TIER_QUALITY_MAX_PRICE) ?? 15,
     modelsCacheTtlMs:
       (parseOptionalNumber(process.env.MODELS_CACHE_TTL_SECONDS) ?? 300) * 1000,
+    defaultMaxTokens:
+      parseOptionalNumber(process.env.DEFAULT_MAX_TOKENS) ?? 4096,
+    reasoningMinMaxTokens:
+      parseOptionalNumber(process.env.REASONING_MIN_MAX_TOKENS) ?? 2000,
+    maxOutputTokens: parseOptionalNumber(process.env.MAX_OUTPUT_TOKENS) ?? 32_000,
+    maxContinuations: parseOptionalNumber(process.env.MAX_CONTINUATIONS) ?? 3,
+    maxResponseChars:
+      parseOptionalNumber(process.env.MAX_RESPONSE_CHARS) ?? 25_000,
   };
 }

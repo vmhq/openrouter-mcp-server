@@ -13,7 +13,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { loadConfig } from "./config.js";
 import { OPENROUTER_ICON_CDN_URL, OPENROUTER_ICON_DATA_URI } from "./icon.js";
 import { OpenRouterClient } from "./openrouter.js";
-import { registerTools } from "./tools.js";
+import { createToolContext, registerTools } from "./tools/index.js";
 import {
   authorizationServerMetadata,
   beginAuthorize,
@@ -31,6 +31,9 @@ import { constantTimeEqual } from "./oauth/state.js";
 
 const cfg = loadConfig();
 const client = new OpenRouterClient(cfg);
+// Shared across requests: the model cache and paged responses must outlive the
+// per-request McpServer instances built below.
+const toolContext = createToolContext(client, cfg);
 
 function buildServer(): McpServer {
   const server = new McpServer({
@@ -53,7 +56,7 @@ function buildServer(): McpServer {
       },
     ],
   });
-  registerTools(server, client, cfg);
+  registerTools(server, toolContext);
   return server;
 }
 
