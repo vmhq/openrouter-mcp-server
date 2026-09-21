@@ -18,6 +18,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
+# Owned by node so a named volume mounted here inherits writable permissions.
+RUN mkdir -p /app/data && chown node:node /app/data
 
 EXPOSE 3000
 USER node

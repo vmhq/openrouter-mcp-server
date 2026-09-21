@@ -47,19 +47,22 @@ services:
       - .env
     volumes:
       # Persists OAuth state (registered clients, token hashes)
-      - ./data:/app/data
+      - openrouter-mcp-data:/app/data
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  openrouter-mcp-data:
 ```
 
 ```bash
 docker compose up -d
 ```
 
-> **Note**: the container runs as the unprivileged `node` user. Make sure the mounted `./data` directory is writable by UID 1000 (`chown -R 1000:1000 ./data`), otherwise OAuth state cannot be persisted.
+> **Note**: the container runs as the unprivileged `node` user. A named volume inherits the image's `node`-owned `/app/data` automatically. If you bind-mount a host directory instead, it must be writable by UID 1000 (`chown -R 1000:1000 ./data`) and must live outside anything your deploy tool recreates (e.g. Dokploy re-clones `code/` on every deploy). Otherwise OAuth state is lost on every restart and Claude asks you to sign in again; the server logs `oauth_state_not_writable` at startup when this happens.
 
 ### Example `.env`
 

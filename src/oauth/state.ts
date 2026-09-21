@@ -7,7 +7,7 @@
  * at module load.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export type RegisteredClient = {
@@ -181,5 +181,21 @@ export function pruneExpiredOAuthState(now = Date.now()): void {
   if (dirty) saveState();
 }
 
+/** Fail loudly at startup: without a writable state dir every restart logs users out. */
+function checkStateWritable(): void {
+  const probe = `${STATE_PATH}.probe`;
+  try {
+    mkdirSync(dirname(STATE_PATH), { recursive: true });
+    writeFileSync(probe, "", { mode: 0o600 });
+    unlinkSync(probe);
+  } catch (err) {
+    console.error(
+      `oauth_state_not_writable: ${dirname(STATE_PATH)} (${err instanceof Error ? err.message : String(err)}). ` +
+        "OAuth tokens will be lost on every restart and clients will have to sign in again."
+    );
+  }
+}
+
 loadState();
+checkStateWritable();
 setInterval(() => pruneExpiredOAuthState(), 60 * 60 * 1000).unref?.();
