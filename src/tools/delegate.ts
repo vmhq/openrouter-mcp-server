@@ -1,6 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { OpenRouterError, type OpenRouterModel } from "../openrouter.js";
+import {
+  OpenRouterError,
+  isDecisionModel,
+  isSystemOneModelId,
+  type OpenRouterModel,
+} from "../openrouter.js";
 import { isAllowedByPolicy, pickModelForTier } from "../selection.js";
 import { DelegationError, runDelegation } from "../completion.js";
 import {
@@ -15,6 +20,7 @@ import {
   textResult,
   toErrorMessage,
 } from "./shared.js";
+import { decisionModelRedirect } from "./decide.js";
 
 /** Shared tail of both delegation tool descriptions. */
 const BUDGET_NOTE = `Output budget: you do NOT need to size max_tokens. The server derives a budget from the model's own context window and per-request output cap, raises it automatically for reasoning models (whose budget is eaten by hidden chain-of-thought), and if the answer is still cut off it resumes the model and stitches the pieces together (auto_continue, on by default). Pass max_tokens only to deliberately cap length or cost. If the final answer is still incomplete you get truncated=true plus a note saying so — never a silently clipped answer.
@@ -110,11 +116,17 @@ Returns: the answer as text, plus {model_used, finish_reason, truncated, usage:{
             "No model specified and DEFAULT_MODEL is not set in .env. Pass 'model' explicitly (use openrouter_list_models to choose one)."
           );
         }
+        if (isSystemOneModelId(modelId)) {
+          return errorResult(decisionModelRedirect(modelId));
+        }
         const model = await client.getModel(modelId);
         if (!model) {
           return errorResult(
             `Model '${modelId}' not found on OpenRouter. Use openrouter_list_models to find a valid id.`
           );
+        }
+        if (isDecisionModel(model)) {
+          return errorResult(decisionModelRedirect(modelId));
         }
         const policy = isAllowedByPolicy(model, cfg);
         if (!policy.allowed) {

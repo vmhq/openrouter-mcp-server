@@ -10,6 +10,7 @@ Remote MCP server (streamable HTTP, stateless JSON) that lets AI agents **delega
 - **Policy via `.env`**: max price caps, allowed/blocked model lists, default model, preferred providers.
 - **Real cost**: every delegation returns tokens used and estimated cost in USD.
 - **No truncated answers**: the server sizes the output budget itself and resumes answers that hit the token limit, so the calling agent never has to guess `max_tokens` (see [Output budget](#output-budget-no-more-truncated-answers)).
+- **Decision models (System One)**: ask models like TypeSafe's Jev (`~typesafe/jev-latest`) typed questions — yes/no, pick-one, rubric score — about a text, via OpenRouter's `POST /api/v1/systemone`. Ideal for cheap classification, routing and triage.
 
 ## Installation
 
@@ -188,9 +189,25 @@ See [.env.example](.env.example) — the main ones:
 | `openrouter_delegate_task` | Delegates a task to a specific model; returns response, tokens, and estimated cost |
 | `openrouter_auto_delegate` | The server picks the model by price tier (`economy`/`balanced`/`quality`) and delegates |
 | `openrouter_fetch_response` | Reads the remaining pages of a delegated answer too large to return inline |
+| `openrouter_decide` | Asks a decision model (default `~typesafe/jev-latest`) typed questions (`noul` / `choice` / `score`) about a `state`; returns answers with probabilities/confidence and the real cost |
 | `openrouter_check_credits` | Usage and limits of the configured API key |
 
 Typical agent flow: `openrouter_list_models` (or directly `openrouter_auto_delegate` with the `economy` tier) → delegate the task → use the response, knowing how much it cost.
+
+For classification-style work (is this urgent? which team? how frustrated, 0-3?), `openrouter_decide` is far cheaper than a text model. Put only the material in `state` and one simple judgement per question:
+
+```json
+{
+  "state": "I was charged twice for my subscription.",
+  "questions": {
+    "refund": { "type": "noul", "instructions": "Is the customer asking for money back?" },
+    "team": { "type": "choice", "instructions": "Which team should handle this?",
+              "criteria": { "billing": "Charges and refunds", "technical": "Bugs and outages" } }
+  }
+}
+```
+
+Decision models don't appear in `openrouter_list_models` (OpenRouter lists them separately) and are rejected by the text delegation tools; `ALLOWED_MODELS`/`BLOCKED_MODELS` still apply (e.g. `BLOCKED_MODELS=typesafe/`).
 
 **Important**: the delegated model **does not see the agent's conversation**; the task (`task`) must be self-contained, with all the necessary context.
 
