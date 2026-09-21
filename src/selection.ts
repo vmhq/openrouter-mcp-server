@@ -2,6 +2,7 @@ import type { ServerConfig } from "./config.js";
 import {
   OpenRouterModel,
   blendedPricePerM,
+  isDecisionModel,
   isFreeModel,
   pricePerM,
   supportsTools,
@@ -16,25 +17,38 @@ export interface ModelRequirements {
 }
 
 /** Matches an entry from ALLOWED_MODELS/BLOCKED_MODELS: exact id or "provider/" prefix. */
-function matchesEntry(modelId: string, entry: string): boolean {
+function matchesEntry(rawId: string, rawEntry: string): boolean {
+  // "~author/model-latest" aliases are matched like "author/model-latest".
+  const modelId = rawId.replace(/^~/, "");
+  const entry = rawEntry.replace(/^~/, "");
   if (entry.endsWith("/")) return modelId.startsWith(entry);
   if (entry.endsWith("/*")) return modelId.startsWith(entry.slice(0, -1));
   return modelId === entry;
+}
+
+/** ALLOWED_MODELS/BLOCKED_MODELS check for an id that may not be in the catalog. */
+export function isIdAllowedByLists(
+  modelId: string,
+  cfg: ServerConfig
+): { allowed: boolean; reason?: string } {
+  if (cfg.blockedModels.some((e) => matchesEntry(modelId, e))) {
+    return { allowed: false, reason: "blocked by BLOCKED_MODELS in .env" };
+  }
+  if (
+    cfg.allowedModels.length > 0 &&
+    !cfg.allowedModels.some((e) => matchesEntry(modelId, e))
+  ) {
+    return { allowed: false, reason: "not in ALLOWED_MODELS in .env" };
+  }
+  return { allowed: true };
 }
 
 export function isAllowedByPolicy(
   model: OpenRouterModel,
   cfg: ServerConfig
 ): { allowed: boolean; reason?: string } {
-  if (cfg.blockedModels.some((e) => matchesEntry(model.id, e))) {
-    return { allowed: false, reason: "blocked by BLOCKED_MODELS in .env" };
-  }
-  if (
-    cfg.allowedModels.length > 0 &&
-    !cfg.allowedModels.some((e) => matchesEntry(model.id, e))
-  ) {
-    return { allowed: false, reason: "not in ALLOWED_MODELS in .env" };
-  }
+  const lists = isIdAllowedByLists(model.id, cfg);
+  if (!lists.allowed) return lists;
   if (!cfg.allowFreeModels && isFreeModel(model)) {
     return { allowed: false, reason: "free models disabled (ALLOW_FREE_MODELS=false)" };
   }
@@ -75,6 +89,7 @@ export function meetsRequirements(
     return false;
   }
   if (req.textOutputOnly) {
+    if (isDecisionModel(model)) return false;
     const outputs = model.architecture?.output_modalities;
     if (outputs && !outputs.includes("text")) return false;
   }

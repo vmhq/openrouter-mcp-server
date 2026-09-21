@@ -3,6 +3,7 @@ import type { ServerConfig } from "../config.js";
 import type { OpenRouterClient } from "../openrouter.js";
 import { ResponseStore } from "../responseStore.js";
 import { registerCreditTools } from "./credits.js";
+import { registerDecisionTools } from "./decide.js";
 import { registerDelegationTools } from "./delegate.js";
 import { registerModelTools } from "./models.js";
 import type { ToolContext } from "./shared.js";
@@ -24,5 +25,6 @@ export function createToolContext(
 export function registerTools(server: McpServer, ctx: ToolContext): void {
   registerModelTools(server, ctx);
   registerDelegationTools(server, ctx);
+  registerDecisionTools(server, ctx);
   registerCreditTools(server, ctx);
 }

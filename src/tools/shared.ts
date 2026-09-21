@@ -7,6 +7,7 @@ import {
   OpenRouterModel,
   blendedPricePerM,
   estimateCostUsd,
+  isDecisionModel,
   isFreeModel,
   pricePerM,
   round,
@@ -83,7 +84,9 @@ export function modelSummary(m: OpenRouterModel) {
     blended_price_per_m: round(blendedPricePerM(m), 4),
     supports_tools: supportsTools(m),
     free: isFreeModel(m),
-    modality: m.architecture?.modality ?? "text->text",
+    modality: isDecisionModel(m)
+      ? "text->decision"
+      : m.architecture?.modality ?? "text->text",
   };
 }
 

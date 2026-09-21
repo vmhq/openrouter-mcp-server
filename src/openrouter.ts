@@ -60,6 +60,35 @@ export interface ChatCompletionResult {
   usage?: ChatUsage;
 }
 
+// System One (decision) models such as TypeSafe's Jev don't generate text:
+// they answer typed questions about a state via POST /v1/systemone.
+export type SystemOneQuestion =
+  | { type: "noul"; instructions: string }
+  | { type: "choice"; instructions: string; criteria: Record<string, string> }
+  | { type: "score"; instructions: string; criteria: string[] };
+
+export interface SystemOneResult {
+  id?: string;
+  model: string;
+  provider?: string;
+  answers: Record<string, Record<string, unknown>>;
+  usage?: { input_tokens?: number; output_tokens?: number; cost?: number };
+}
+
+/** True for decision-only model ids like "jev-latest" or "~typesafe/jev-latest". */
+export function isSystemOneModelId(id: string): boolean {
+  const bare = id.replace(/^~/, "");
+  return bare.startsWith("typesafe/") || /^jev(-|$)/.test(bare);
+}
+
+/** True when the catalog says the model doesn't output text (e.g. decisions). */
+export function isDecisionModel(model: OpenRouterModel): boolean {
+  if (isSystemOneModelId(model.id)) return true;
+  const outputs = model.architecture?.output_modalities ?? [];
+  const generative = ["text", "image", "audio"];
+  return outputs.length > 0 && !outputs.some((o) => generative.includes(o));
+}
+
 export class OpenRouterError extends Error {
   constructor(message: string, public status?: number) {
     super(message);
@@ -314,6 +343,22 @@ export class OpenRouterClient {
       finishReason: choice?.finish_reason,
       usage: raw.usage,
     };
+  }
+
+  /**
+   * Ask a System One model typed questions about a state. Bare ids such as
+   * "jev-latest" are mapped by OpenRouter onto its typesafe/ namespace.
+   */
+  async systemOne(params: {
+    model: string;
+    state: string;
+    questions: Record<string, SystemOneQuestion>;
+  }): Promise<SystemOneResult> {
+    return this.request<SystemOneResult>("/systemone", {
+      method: "POST",
+      body: params,
+      timeoutMs: 60_000,
+    });
   }
 
   /** Info about the current API key: usage, limits, free tier. */
