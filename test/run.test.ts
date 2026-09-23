@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DelegationError, runDelegation } from "../src/completion.js";
+import { DelegationError, runDelegation } from "../src/delegation/run.js";
 import { FakeClient, makeConfig, makeModel } from "./helpers.js";
 
 const cfg = makeConfig();

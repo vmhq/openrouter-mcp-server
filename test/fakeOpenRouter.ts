@@ -1,4 +1,4 @@
-import type { OpenRouterModel } from "../src/openrouter.js";
+import type { OpenRouterModel } from "../src/openrouter/types.js";
 
 export interface RecordedRequest {
   method: string;

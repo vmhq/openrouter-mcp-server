@@ -8,7 +8,7 @@ import { OAUTH_CORS_HEADERS, sendUnauthorized } from "./oauth/handlers.js";
 import type { PocketIdClient } from "./oauth/pocketid.js";
 import { createOAuthRouter } from "./oauth/router.js";
 import type { OAuthStore } from "./oauth/store.js";
-import type { OpenRouterClient } from "./openrouter.js";
+import type { OpenRouterClient } from "./openrouter/client.js";
 import { createToolContext, registerTools, type ToolContext } from "./tools/index.js";
 import { SERVER_VERSION } from "./version.js";
 

@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  estimateTokens,
-  growBudget,
-  isReasoningModel,
-  modelCompletionCap,
-  resolveBudget,
-} from "../src/budget.js";
+import { estimateTokens, growBudget, resolveBudget } from "../src/delegation/budget.js";
+import { isReasoningModel, modelCompletionCap } from "../src/models/capabilities.js";
 import { makeConfig, makeModel } from "./helpers.js";
 
 const cfg = makeConfig();

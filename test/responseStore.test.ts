@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ResponseStore, pageOf } from "../src/responseStore.js";
+import { ResponseStore, pageOf } from "../src/delegation/responseStore.js";
 
 describe("pageOf", () => {
   it("returns the whole text when it fits", () => {

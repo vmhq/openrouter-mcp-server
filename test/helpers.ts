@@ -3,7 +3,7 @@ import type {
   ChatCompletionParams,
   ChatCompletionResult,
   OpenRouterModel,
-} from "../src/openrouter.js";
+} from "../src/openrouter/types.js";
 
 export function makeConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
   return {

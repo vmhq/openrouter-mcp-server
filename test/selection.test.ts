@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { blendedPricePerM, estimateCostUsd, isFreeModel, pricePerM } from "../src/openrouter.js";
-import { isAllowedByPolicy, pickModelForTier } from "../src/selection.js";
+import { isAllowedByPolicy } from "../src/models/policy.js";
+import {
+  blendedPricePerM,
+  estimateCostUsd,
+  isFreeModel,
+  pricePerM,
+} from "../src/models/pricing.js";
+import { pickModelForTier } from "../src/models/selection.js";
 import { makeConfig, makeModel } from "./helpers.js";
 
 const priced = (id: string, prompt: number, completion: number) =>

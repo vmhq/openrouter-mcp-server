@@ -14,7 +14,7 @@ import { createApp, type AppDeps } from "./app.js";
 import { ConfigError, loadConfig, type ServerConfig } from "./config.js";
 import { PocketIdClient } from "./oauth/pocketid.js";
 import { OAuthStore } from "./oauth/store.js";
-import { OpenRouterClient } from "./openrouter.js";
+import { OpenRouterClient } from "./openrouter/client.js";
 
 function readConfig(): ServerConfig {
   loadEnv();

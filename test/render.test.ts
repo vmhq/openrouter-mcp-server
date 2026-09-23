@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { DelegationOutcome } from "../src/completion.js";
-import { ResponseStore } from "../src/responseStore.js";
-import { renderDelegation } from "../src/tools/shared.js";
-import type { ToolContext } from "../src/tools/shared.js";
+import type { DelegationOutcome } from "../src/delegation/run.js";
+import { ResponseStore } from "../src/delegation/responseStore.js";
+import { renderDelegation } from "../src/tools/render.js";
+import type { ToolContext } from "../src/tools/context.js";
 import { makeConfig, makeModel } from "./helpers.js";
 
 const model = makeModel();

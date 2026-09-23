@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ServerConfig } from "../src/config.js";
-import { OpenRouterClient } from "../src/openrouter.js";
+import { OpenRouterClient } from "../src/openrouter/client.js";
 import { createToolContext, registerTools } from "../src/tools/index.js";
 
 export interface ToolCallResult {

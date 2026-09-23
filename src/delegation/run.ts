@@ -1,4 +1,4 @@
-import type { ServerConfig } from "./config.js";
+import type { ServerConfig } from "../config.js";
 import { growBudget, estimateMessageTokens, resolveBudget } from "./budget.js";
 import type {
   ChatCompletionParams,
@@ -7,7 +7,7 @@ import type {
   ChatUsage,
   OpenRouterModel,
   ReasoningEffort,
-} from "./openrouter.js";
+} from "../openrouter/types.js";
 
 /**
  * Runs one delegation to completion — including the parts the calling agent

@@ -8,7 +8,7 @@ import { createApp, type AppDeps } from "../src/app.js";
 import type { ServerConfig } from "../src/config.js";
 import { PocketIdClient } from "../src/oauth/pocketid.js";
 import { OAuthStore } from "../src/oauth/store.js";
-import { OpenRouterClient } from "../src/openrouter.js";
+import { OpenRouterClient } from "../src/openrouter/client.js";
 import { FakeOpenRouter } from "./fakeOpenRouter.js";
 import { makeConfig, makeModel } from "./helpers.js";
 
