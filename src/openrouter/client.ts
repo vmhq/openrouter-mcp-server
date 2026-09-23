@@ -1,5 +1,5 @@
 import type { ServerConfig } from "../config.js";
-import { delay } from "../util.js";
+import { delay, errorMessage } from "../util.js";
 import type {
   ChatCompletionParams,
   ChatCompletionResult,
@@ -84,9 +84,7 @@ export class OpenRouterClient {
           "Request to OpenRouter timed out. Try a smaller max_tokens or a faster model."
         );
       }
-      throw new OpenRouterError(
-        `Network error reaching OpenRouter: ${err instanceof Error ? err.message : String(err)}`
-      );
+      throw new OpenRouterError(`Network error reaching OpenRouter: ${errorMessage(err)}`);
     } finally {
       clearTimeout(timeout);
     }

@@ -271,7 +271,15 @@ The answer itself is returned as plain text with a compact metadata footer, rath
 npm run dev        # tsx watch
 npm run typecheck  # tsc over src/ and test/
 npm test           # typecheck + node:test suite
+npm run lint       # ESLint + Prettier check
+npm run format     # apply Prettier + ESLint fixes
 npm run build      # emit dist/
+```
+
+`test/fixtures/tools-list.json` pins the public tool contract (names, descriptions, input schemas). If you change a tool on purpose, refresh it with:
+
+```bash
+UPDATE_SNAPSHOTS=1 npm test
 ```
 
 ## How `openrouter_auto_delegate` picks a model

@@ -10,60 +10,86 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
-const FORM_SECURITY_HEADERS = {
-  "Content-Security-Policy":
-    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-  "Referrer-Policy": "no-referrer",
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
-} as const;
+function securityHeaders(csp: string): Record<string, string> {
+  return {
+    "Content-Security-Policy": csp,
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+  };
+}
 
-const SUCCESS_PAGE_CSP = {
-  "Content-Security-Policy":
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
-  "Referrer-Policy": "no-referrer",
-  "X-Content-Type-Options": "nosniff",
-  "X-Frame-Options": "DENY",
-} as const;
+const FORM_SECURITY_HEADERS = securityHeaders(
+  "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+);
+
+/** The success page needs its inline redirect script; nothing else does. */
+const SUCCESS_PAGE_SECURITY_HEADERS = securityHeaders(
+  "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
+);
+
+interface Page {
+  title: string;
+  /** Extra <head> markup after the viewport meta tag. */
+  head?: string;
+  /** CSS rules, one per line. */
+  style: string[];
+  /** Markup inside <body>. */
+  body: string;
+}
+
+function renderPage({ title, head, style, body }: Page): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">${head ? `\n  ${head}` : ""}
+  <title>${title} — OpenRouter MCP</title>
+  <style>
+${style.map((rule) => `    ${rule}`).join("\n")}
+  </style>
+</head>
+<body>
+${body}
+</body>
+</html>`;
+}
 
 function sendHtml(
   res: ExpressResponse,
   status: number,
-  html: string,
+  page: Page,
   headers: Record<string, string> = FORM_SECURITY_HEADERS
 ): void {
   res
     .status(status)
     .set({ "Content-Type": "text/html; charset=utf-8", ...headers })
-    .send(html);
+    .send(renderPage(page));
 }
+
+/** Dark card layout shared by the error and success pages. */
+const CARD_STYLE = [
+  "body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}",
+];
 
 /**
  * Error page shown when the authorization flow cannot proceed (bad client,
  * redirect URI, PKCE, or an identity-provider failure). Always a 400.
  */
 export function renderAuthorizeError(res: ExpressResponse, message: string): void {
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Authorization error — OpenRouter MCP</title>
-  <style>
-    body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-    .card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:2rem;width:100%;max-width:420px}
-    h1{margin:0 0 .5rem;font-size:1.25rem;color:#fca5a5}
-    p{margin:0;color:#aaa;font-size:.95rem;line-height:1.5}
-  </style>
-</head>
-<body>
-  <div class="card">
+  sendHtml(res, 400, {
+    title: "Authorization error",
+    style: [
+      ...CARD_STYLE,
+      ".card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:2rem;width:100%;max-width:420px}",
+      "h1{margin:0 0 .5rem;font-size:1.25rem;color:#fca5a5}",
+      "p{margin:0;color:#aaa;font-size:.95rem;line-height:1.5}",
+    ],
+    body: `  <div class="card">
     <h1>Authorization error</h1>
     <p>${escapeHtml(message)}</p>
-  </div>
-</body>
-</html>`;
-  sendHtml(res, 400, html);
+  </div>`,
+  });
 }
 
 /**
@@ -76,32 +102,23 @@ export function renderAuthorizeConsent(
   authUrl: string,
   opts: { clientName?: string } = {}
 ): void {
-  const href = escapeHtml(authUrl);
   const app = opts.clientName ? escapeHtml(opts.clientName) : "";
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sign in — OpenRouter MCP</title>
-  <style>
-    body{font-family:system-ui,-apple-system,sans-serif;background:#0c0c0c;color:#ededed;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-    .card{display:flex;flex-direction:column;align-items:center;gap:1.5rem;padding:2rem;width:100%;max-width:380px;text-align:center}
-    h1{margin:0;font-size:1.6rem;font-weight:600;letter-spacing:-.01em}
-    p{margin:0;color:#8a8a8a;font-size:.9rem;line-height:1.5}
-    .btn{display:block;width:100%;box-sizing:border-box;padding:.8rem 1rem;background:#000;color:#fff;border:1px solid #2a2a2a;border-radius:8px;font-size:.95rem;font-weight:500;text-decoration:none;transition:border-color .15s,background .15s}
-    .btn:hover{background:#161616;border-color:#3a3a3a}
-  </style>
-</head>
-<body>
-  <div class="card">
+  sendHtml(res, 200, {
+    title: "Sign in",
+    style: [
+      "body{font-family:system-ui,-apple-system,sans-serif;background:#0c0c0c;color:#ededed;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}",
+      ".card{display:flex;flex-direction:column;align-items:center;gap:1.5rem;padding:2rem;width:100%;max-width:380px;text-align:center}",
+      "h1{margin:0;font-size:1.6rem;font-weight:600;letter-spacing:-.01em}",
+      "p{margin:0;color:#8a8a8a;font-size:.9rem;line-height:1.5}",
+      ".btn{display:block;width:100%;box-sizing:border-box;padding:.8rem 1rem;background:#000;color:#fff;border:1px solid #2a2a2a;border-radius:8px;font-size:.95rem;font-weight:500;text-decoration:none;transition:border-color .15s,background .15s}",
+      ".btn:hover{background:#161616;border-color:#3a3a3a}",
+    ],
+    body: `  <div class="card">
     <h1>OpenRouter MCP</h1>
     ${app ? `<p>${app} wants to connect to your MCP server.</p>` : ""}
-    <a class="btn" href="${href}">Sign in with PocketID</a>
-  </div>
-</body>
-</html>`;
-  sendHtml(res, 200, html);
+    <a class="btn" href="${escapeHtml(authUrl)}">Sign in with PocketID</a>
+  </div>`,
+  });
 }
 
 export function buildAuthorizationRedirectUrl(
@@ -109,8 +126,7 @@ export function buildAuthorizationRedirectUrl(
   code: string,
   state: string
 ): string {
-  const target = canonicalRedirectUri(redirectUri);
-  const redirect = new URL(target);
+  const redirect = new URL(canonicalRedirectUri(redirectUri));
   redirect.searchParams.set("code", code);
   if (state) redirect.searchParams.set("state", state);
   return redirect.toString();
@@ -128,30 +144,27 @@ export function renderAuthorizeSuccess(res: ExpressResponse, redirectUrl: string
   // JSON.stringify does not escape "/", so a URL containing "</script>" would
   // terminate the inline <script> block. Escape "<" for safe embedding.
   const jsUrl = JSON.stringify(redirectUrl).replace(/</g, "\\u003c");
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="refresh" content="0;url=${href}">
-  <title>Authorized — OpenRouter MCP</title>
-  <style>
-    body{font-family:system-ui,sans-serif;background:#0f0f0f;color:#e0e0e0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-    .card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:2rem;width:100%;max-width:420px;text-align:center}
-    h1{margin:0 0 .5rem;font-size:1.25rem;color:#86efac}
-    p{margin:0 0 1.25rem;color:#888;font-size:.9rem;line-height:1.5}
-    a{color:#3b82f6;text-decoration:none;font-weight:500}
-    a:hover{text-decoration:underline}
-  </style>
-</head>
-<body>
-  <div class="card">
+  sendHtml(
+    res,
+    200,
+    {
+      title: "Authorized",
+      head: `<meta http-equiv="refresh" content="0;url=${href}">`,
+      style: [
+        ...CARD_STYLE,
+        ".card{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:2rem;width:100%;max-width:420px;text-align:center}",
+        "h1{margin:0 0 .5rem;font-size:1.25rem;color:#86efac}",
+        "p{margin:0 0 1.25rem;color:#888;font-size:.9rem;line-height:1.5}",
+        "a{color:#3b82f6;text-decoration:none;font-weight:500}",
+        "a:hover{text-decoration:underline}",
+      ],
+      body: `  <div class="card">
     <h1>Connected</h1>
     <p>Authorization succeeded. Returning you to your client…</p>
     <p><a href="${href}">Continue</a> if you are not redirected automatically.</p>
   </div>
-  <script>setTimeout(function(){window.location.replace(${jsUrl});},100);</script>
-</body>
-</html>`;
-  sendHtml(res, 200, html, SUCCESS_PAGE_CSP);
+  <script>setTimeout(function(){window.location.replace(${jsUrl});},100);</script>`,
+    },
+    SUCCESS_PAGE_SECURITY_HEADERS
+  );
 }

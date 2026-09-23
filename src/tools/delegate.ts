@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { withDataPolicyFallback } from "../delegation/fallback.js";
+import { RESPONSE_TTL_MS } from "../delegation/responseStore.js";
 import { runDelegation } from "../delegation/run.js";
 import { resolveTextModel } from "../models/resolve.js";
 import { pickModelForTier } from "../models/selection.js";
@@ -23,6 +24,8 @@ function buildMessages(task: string, systemPrompt?: string): ChatMessage[] {
   messages.push({ role: "user", content: task });
   return messages;
 }
+
+const RESPONSE_TTL = `${RESPONSE_TTL_MS / 60_000} minutes`;
 
 /** Shared tail of both delegation tool descriptions. */
 const BUDGET_NOTE = `Output budget: you do NOT need to size max_tokens. The server derives a budget from the model's own context window and per-request output cap, raises it automatically for reasoning models (whose budget is eaten by hidden chain-of-thought), and if the answer is still cut off it resumes the model and stitches the pieces together (auto_continue, on by default). Pass max_tokens only to deliberately cap length or cost. If the final answer is still incomplete you get truncated=true plus a note saying so — never a silently clipped answer.
@@ -185,7 +188,7 @@ Args:
 
 Returns: {text, offset, next_offset, total_chars, has_more}.
 
-Responses are kept in memory for 30 minutes and are lost on server restart; re-run the delegation if the id has expired.`,
+Responses are kept in memory for ${RESPONSE_TTL} and are lost on server restart; re-run the delegation if the id has expired.`,
       inputSchema: {
         response_id: z.string().min(1).max(100),
         offset: z.number().int().min(0).default(0),
@@ -201,7 +204,7 @@ Responses are kept in memory for 30 minutes and are lost on server restart; re-r
       );
       if (!page) {
         return errorResult(
-          `Response '${params.response_id}' is not available any more (responses expire after 30 minutes and are lost on restart). Re-run the delegation.`
+          `Response '${params.response_id}' is not available any more (responses expire after ${RESPONSE_TTL} and are lost on restart). Re-run the delegation.`
         );
       }
       const footer = page.has_more

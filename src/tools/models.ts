@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { isReasoningModel, modelCompletionCap, supportsTools } from "../models/capabilities.js";
+import { isReasoningModel, supportsTools } from "../models/capabilities.js";
 import { isAllowedByPolicy } from "../models/policy.js";
 import { blendedPricePerM, isFreeModel } from "../models/pricing.js";
 import type { ToolContext } from "./context.js";
@@ -79,11 +79,12 @@ Returns: total/count/offset plus rows of {id, name, context_length, max_completi
       }
       if (!params.include_free) models = models.filter((m) => !isFreeModel(m));
       if (params.require_tools) models = models.filter(supportsTools);
-      if (params.min_context !== undefined) {
-        models = models.filter((m) => (m.context_length ?? 0) >= (params.min_context ?? 0));
+      const { min_context: minContext, max_blended_price_per_m: maxPrice } = params;
+      if (minContext !== undefined) {
+        models = models.filter((m) => (m.context_length ?? 0) >= minContext);
       }
-      if (params.max_blended_price_per_m !== undefined) {
-        models = models.filter((m) => blendedPricePerM(m) <= (params.max_blended_price_per_m ?? 0));
+      if (maxPrice !== undefined) {
+        models = models.filter((m) => blendedPricePerM(m) <= maxPrice);
       }
 
       models.sort((a, b) => {
@@ -152,7 +153,6 @@ Returns: the model record plus {is_reasoning_model, allowed_by_policy, policy_re
         description: model.description ?? "",
         input_modalities: model.architecture?.input_modalities ?? ["text"],
         output_modalities: model.architecture?.output_modalities ?? ["text"],
-        max_completion_tokens: modelCompletionCap(model) ?? null,
         is_reasoning_model: isReasoningModel(model),
         supported_parameters: model.supported_parameters ?? [],
         allowed_by_policy: policy.allowed,

@@ -1,7 +1,7 @@
 /** Text and structured output for model listings and delegation results. */
 import type { DelegationOutcome } from "../delegation/run.js";
 import { pageOf } from "../delegation/responseStore.js";
-import { isDecisionModel, supportsTools } from "../models/capabilities.js";
+import { isDecisionModel, modelCompletionCap, supportsTools } from "../models/capabilities.js";
 import { blendedPricePerM, estimateCostUsd, isFreeModel, pricePerM } from "../models/pricing.js";
 import type { ChatUsage, OpenRouterModel } from "../openrouter/types.js";
 import { round } from "../util.js";
@@ -15,7 +15,7 @@ export function modelSummary(m: OpenRouterModel) {
     id: m.id,
     name: m.name,
     context_length: m.context_length ?? 0,
-    max_completion_tokens: m.top_provider?.max_completion_tokens ?? null,
+    max_completion_tokens: modelCompletionCap(m) ?? null,
     prompt_price_per_m: round(pricePerM(m.pricing.prompt), 4),
     completion_price_per_m: round(pricePerM(m.pricing.completion), 4),
     blended_price_per_m: round(blendedPricePerM(m), 4),

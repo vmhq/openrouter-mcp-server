@@ -12,7 +12,7 @@
  */
 
 const MAX_ENTRIES = 32;
-const TTL_MS = 30 * 60 * 1000;
+export const RESPONSE_TTL_MS = 30 * 60 * 1000;
 
 export interface StoredResponse {
   id: string;
@@ -35,7 +35,7 @@ export class ResponseStore {
 
   constructor(
     private maxEntries = MAX_ENTRIES,
-    private ttlMs = TTL_MS,
+    private ttlMs = RESPONSE_TTL_MS,
     private now: () => number = Date.now
   ) {}
 

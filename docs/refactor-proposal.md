@@ -1,7 +1,31 @@
 # Propuesta de refactorización — openrouter-mcp-server
 
 > Estado de partida: `main` @ `84e6424`. `npm test` → 50/50 en verde, `tsc --strict` sin errores.
-> Este documento **no cambia código**; propone qué cambiar, por qué y en qué orden.
+
+## Estado: implementada
+
+Las seis fases están implementadas, una por commit (`Phase 0` … `Phase 5`), más dos
+commits previos que solo añaden ESLint/Prettier y aplican el formato. Resultado:
+119 tests en verde (antes 50), lint limpio, y el snapshot de `tools/list` intacto
+desde la Fase 0 (nombres, descripciones y esquemas de las tools sin cambios).
+
+Cambios de comportamiento visibles, todos intencionales:
+
+- **A1:** con PocketID desactivado ya no se aceptan tokens OAuth persistidos.
+- **OAuth apagado = sin endpoints OAuth:** sin `POCKETID_*` ya no se sirven
+  `/.well-known/oauth-*` ni `/oauth/*` (antes respondían con una página de error), no
+  se crea `./data`, y el 401 de `/mcp` deja de anunciar `resource_metadata`.
+- **Config estricta (A4):** un valor inválido detiene el arranque con un mensaje que
+  nombra la variable. Además, configurar solo algunas `POCKETID_*` o poner topes de
+  tier desordenados ahora es un error (antes se ignoraba en silencio). Los valores por
+  defecto no cambian y hay un test que los fija.
+- **Presupuesto (A5):** con `MAX_OUTPUT_TOKENS` agotado, `resolveBudget` devuelve un
+  error en vez de volver al techo completo.
+- **`openrouter_list_models`:** un tope de salida de 0 se muestra como `null`, igual
+  que ya hacía `openrouter_get_model`.
+- **Node ≥ 20** en `engines` (CI y Docker ya usaban 22).
+
+El resto de este documento es la propuesta original, que se conserva como contexto.
 
 ## 1. Diagnóstico general
 

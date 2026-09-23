@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DelegationOutcome } from "../src/delegation/run.js";
 import { ResponseStore } from "../src/delegation/responseStore.js";
-import { renderDelegation } from "../src/tools/render.js";
+import { modelSummary, renderDelegation } from "../src/tools/render.js";
 import type { ToolContext } from "../src/tools/context.js";
 import { makeConfig, makeModel } from "./helpers.js";
 
@@ -78,5 +78,15 @@ describe("renderDelegation", () => {
     );
     assert.equal(result.structuredContent?.estimated_cost_usd, 0.1);
     assert.match(result.content[0].text, /2 continuation\(s\)/);
+  });
+});
+
+describe("modelSummary", () => {
+  it("reports a missing or zero provider output cap as null", () => {
+    assert.equal(modelSummary(makeModel()).max_completion_tokens, null);
+    const zero = makeModel({ top_provider: { max_completion_tokens: 0 } });
+    assert.equal(modelSummary(zero).max_completion_tokens, null);
+    const capped = makeModel({ top_provider: { max_completion_tokens: 8192 } });
+    assert.equal(modelSummary(capped).max_completion_tokens, 8192);
   });
 });
