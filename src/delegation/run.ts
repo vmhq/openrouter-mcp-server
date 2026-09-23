@@ -1,4 +1,4 @@
-import type { ServerConfig } from "./config.js";
+import type { ServerConfig } from "../config.js";
 import { growBudget, estimateMessageTokens, resolveBudget } from "./budget.js";
 import type {
   ChatCompletionParams,
@@ -7,7 +7,7 @@ import type {
   ChatUsage,
   OpenRouterModel,
   ReasoningEffort,
-} from "./openrouter.js";
+} from "../openrouter/types.js";
 
 /**
  * Runs one delegation to completion — including the parts the calling agent
@@ -68,12 +68,9 @@ function addUsage(total: ChatUsage, next: ChatUsage | undefined): ChatUsage {
     (next.completion_tokens_details?.reasoning_tokens ?? 0);
   return {
     prompt_tokens: (total.prompt_tokens ?? 0) + (next.prompt_tokens ?? 0),
-    completion_tokens:
-      (total.completion_tokens ?? 0) + (next.completion_tokens ?? 0),
+    completion_tokens: (total.completion_tokens ?? 0) + (next.completion_tokens ?? 0),
     total_tokens: (total.total_tokens ?? 0) + (next.total_tokens ?? 0),
-    ...(reasoning > 0
-      ? { completion_tokens_details: { reasoning_tokens: reasoning } }
-      : {}),
+    ...(reasoning > 0 ? { completion_tokens_details: { reasoning_tokens: reasoning } } : {}),
   };
 }
 
@@ -87,7 +84,7 @@ export async function runDelegation(
   const notes: string[] = [];
 
   let messages = params.messages;
-  let budget = resolveBudget(
+  const budget = resolveBudget(
     {
       model,
       promptTokens: estimateMessageTokens(messages),
@@ -157,9 +154,7 @@ export async function runDelegation(
     if (parts.join("").trim() === "") break;
 
     if (!autoContinue) {
-      notes.push(
-        "answer was cut off by the token limit and auto_continue is disabled"
-      );
+      notes.push("answer was cut off by the token limit and auto_continue is disabled");
       break;
     }
     if (params.jsonMode) {
@@ -219,9 +214,7 @@ export async function runDelegation(
       cfg
     );
     if ("error" in next) {
-      notes.push(
-        `could not continue the answer: ${next.error} The text below is incomplete.`
-      );
+      notes.push(`could not continue the answer: ${next.error} The text below is incomplete.`);
       break;
     }
     maxTokens = next.maxTokens;

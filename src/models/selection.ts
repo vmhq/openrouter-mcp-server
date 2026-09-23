@@ -1,12 +1,9 @@
-import type { ServerConfig } from "./config.js";
-import {
-  OpenRouterModel,
-  blendedPricePerM,
-  isDecisionModel,
-  isFreeModel,
-  pricePerM,
-  supportsTools,
-} from "./openrouter.js";
+import type { ServerConfig } from "../config.js";
+import type { OpenRouterModel } from "../openrouter/types.js";
+import { round } from "../util.js";
+import { isDecisionModel, supportsTools } from "./capabilities.js";
+import { isAllowedByPolicy } from "./policy.js";
+import { blendedPricePerM } from "./pricing.js";
 
 export type Tier = "economy" | "balanced" | "quality";
 
@@ -16,76 +13,9 @@ export interface ModelRequirements {
   textOutputOnly?: boolean;
 }
 
-/** Matches an entry from ALLOWED_MODELS/BLOCKED_MODELS: exact id or "provider/" prefix. */
-function matchesEntry(rawId: string, rawEntry: string): boolean {
-  // "~author/model-latest" aliases are matched like "author/model-latest".
-  const modelId = rawId.replace(/^~/, "");
-  const entry = rawEntry.replace(/^~/, "");
-  if (entry.endsWith("/")) return modelId.startsWith(entry);
-  if (entry.endsWith("/*")) return modelId.startsWith(entry.slice(0, -1));
-  return modelId === entry;
-}
-
-/** ALLOWED_MODELS/BLOCKED_MODELS check for an id that may not be in the catalog. */
-export function isIdAllowedByLists(
-  modelId: string,
-  cfg: ServerConfig
-): { allowed: boolean; reason?: string } {
-  if (cfg.blockedModels.some((e) => matchesEntry(modelId, e))) {
-    return { allowed: false, reason: "blocked by BLOCKED_MODELS in .env" };
-  }
-  if (
-    cfg.allowedModels.length > 0 &&
-    !cfg.allowedModels.some((e) => matchesEntry(modelId, e))
-  ) {
-    return { allowed: false, reason: "not in ALLOWED_MODELS in .env" };
-  }
-  return { allowed: true };
-}
-
-export function isAllowedByPolicy(
-  model: OpenRouterModel,
-  cfg: ServerConfig
-): { allowed: boolean; reason?: string } {
-  const lists = isIdAllowedByLists(model.id, cfg);
-  if (!lists.allowed) return lists;
-  if (!cfg.allowFreeModels && isFreeModel(model)) {
-    return { allowed: false, reason: "free models disabled (ALLOW_FREE_MODELS=false)" };
-  }
-  if (
-    cfg.maxPromptPricePerM !== undefined &&
-    pricePerM(model.pricing.prompt) > cfg.maxPromptPricePerM
-  ) {
-    return {
-      allowed: false,
-      reason: `prompt price $${pricePerM(model.pricing.prompt).toFixed(
-        2
-      )}/M exceeds MAX_PROMPT_PRICE_PER_M ($${cfg.maxPromptPricePerM}/M)`,
-    };
-  }
-  if (
-    cfg.maxCompletionPricePerM !== undefined &&
-    pricePerM(model.pricing.completion) > cfg.maxCompletionPricePerM
-  ) {
-    return {
-      allowed: false,
-      reason: `completion price $${pricePerM(model.pricing.completion).toFixed(
-        2
-      )}/M exceeds MAX_COMPLETION_PRICE_PER_M ($${cfg.maxCompletionPricePerM}/M)`,
-    };
-  }
-  return { allowed: true };
-}
-
-export function meetsRequirements(
-  model: OpenRouterModel,
-  req: ModelRequirements
-): boolean {
+export function meetsRequirements(model: OpenRouterModel, req: ModelRequirements): boolean {
   if (req.requireTools && !supportsTools(model)) return false;
-  if (
-    req.minContext !== undefined &&
-    (model.context_length ?? 0) < req.minContext
-  ) {
+  if (req.minContext !== undefined && (model.context_length ?? 0) < req.minContext) {
     return false;
   }
   if (req.textOutputOnly) {
@@ -156,9 +86,7 @@ export function pickModelForTier(
     let candidates = eligible.filter((m) => inBand(m, bands[band]));
     if (candidates.length === 0) continue;
 
-    const preferredCandidates = candidates.filter((m) =>
-      preferred.has(providerOf(m.id))
-    );
+    const preferredCandidates = candidates.filter((m) => preferred.has(providerOf(m.id)));
     if (preferredCandidates.length > 0) candidates = preferredCandidates;
 
     // economy/balanced: cheapest wins; quality: highest price within cap wins.
@@ -177,16 +105,12 @@ export function pickModelForTier(
       model: chosen,
       reason:
         `Selected from ${note}, ` +
-        (tier === "quality"
-          ? "highest-priced candidate within the cap"
-          : "cheapest candidate") +
-        (preferred.has(providerOf(chosen.id))
-          ? ", from preferred providers"
-          : ""),
+        (tier === "quality" ? "highest-priced candidate within the cap" : "cheapest candidate") +
+        (preferred.has(providerOf(chosen.id)) ? ", from preferred providers" : ""),
       candidatesConsidered: eligible.length,
       runnersUp: candidates.slice(1, 4).map((m) => ({
         id: m.id,
-        blendedPricePerM: Math.round(blendedPricePerM(m) * 100) / 100,
+        blendedPricePerM: round(blendedPricePerM(m), 2),
       })),
     };
   }

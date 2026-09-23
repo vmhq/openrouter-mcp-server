@@ -1,154 +1,28 @@
-import type { ServerConfig } from "./config.js";
-
-// ---------- Types (subset of the OpenRouter API we use) ----------
-
-export interface OpenRouterModel {
-  id: string;
-  name: string;
-  description?: string;
-  created?: number;
-  context_length: number | null;
-  architecture?: {
-    modality?: string;
-    input_modalities?: string[];
-    output_modalities?: string[];
-  };
-  pricing: {
-    prompt: string;
-    completion: string;
-    [key: string]: string | undefined;
-  };
-  top_provider?: {
-    context_length?: number | null;
-    max_completion_tokens?: number | null;
-  };
-  supported_parameters?: string[];
-}
-
-export interface ChatUsage {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  completion_tokens_details?: {
-    reasoning_tokens?: number;
-  };
-}
-
-export type ReasoningEffort = "none" | "low" | "medium" | "high";
-
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-}
-
-export interface ChatCompletionParams {
-  model: string;
-  messages: ChatMessage[];
-  maxTokens?: number;
-  temperature?: number;
-  jsonMode?: boolean;
-  reasoningEffort?: ReasoningEffort;
-  webSearch?: boolean;
-  webMaxResults?: number;
-}
-
-export interface ChatCompletionResult {
-  id: string;
-  model: string;
-  content: string;
-  finishReason?: string;
-  usage?: ChatUsage;
-}
-
-// System One (decision) models such as TypeSafe's Jev don't generate text:
-// they answer typed questions about a state via POST /v1/systemone.
-export type SystemOneQuestion =
-  | { type: "noul"; instructions: string }
-  | { type: "choice"; instructions: string; criteria: Record<string, string> }
-  | { type: "score"; instructions: string; criteria: string[] };
-
-export interface SystemOneResult {
-  id?: string;
-  model: string;
-  provider?: string;
-  answers: Record<string, Record<string, unknown>>;
-  usage?: { input_tokens?: number; output_tokens?: number; cost?: number };
-}
-
-/** True for decision-only model ids like "jev-latest" or "~typesafe/jev-latest". */
-export function isSystemOneModelId(id: string): boolean {
-  const bare = id.replace(/^~/, "");
-  return bare.startsWith("typesafe/") || /^jev(-|$)/.test(bare);
-}
-
-/** True when the catalog says the model doesn't output text (e.g. decisions). */
-export function isDecisionModel(model: OpenRouterModel): boolean {
-  if (isSystemOneModelId(model.id)) return true;
-  const outputs = model.architecture?.output_modalities ?? [];
-  const generative = ["text", "image", "audio"];
-  return outputs.length > 0 && !outputs.some((o) => generative.includes(o));
-}
+import type { ServerConfig } from "../config.js";
+import { delay, errorMessage } from "../util.js";
+import type {
+  ChatCompletionParams,
+  ChatCompletionResult,
+  ChatUsage,
+  OpenRouterModel,
+  SystemOneQuestion,
+  SystemOneResult,
+} from "./types.js";
 
 export class OpenRouterError extends Error {
-  constructor(message: string, public status?: number) {
+  constructor(
+    message: string,
+    public status?: number
+  ) {
     super(message);
     this.name = "OpenRouterError";
   }
 }
 
-// ---------- Pricing helpers ----------
-
-/** Price in USD per 1M tokens from OpenRouter's per-token string. */
-export function pricePerM(perToken: string | undefined): number {
-  const n = Number(perToken ?? "0");
-  return Number.isNaN(n) ? 0 : n * 1_000_000;
-}
-
-/** Blended $/M used for ranking: input weighs more in typical delegation. */
-export function blendedPricePerM(model: OpenRouterModel): number {
-  return (
-    0.7 * pricePerM(model.pricing.prompt) +
-    0.3 * pricePerM(model.pricing.completion)
-  );
-}
-
-export function isFreeModel(model: OpenRouterModel): boolean {
-  return (
-    pricePerM(model.pricing.prompt) === 0 &&
-    pricePerM(model.pricing.completion) === 0
-  );
-}
-
-export function supportsTools(model: OpenRouterModel): boolean {
-  return model.supported_parameters?.includes("tools") ?? false;
-}
-
-export function estimateCostUsd(
-  model: OpenRouterModel,
-  usage: ChatUsage | undefined
-): number | undefined {
-  if (!usage) return undefined;
-  const promptCost =
-    (usage.prompt_tokens ?? 0) * Number(model.pricing.prompt ?? "0");
-  const completionCost =
-    (usage.completion_tokens ?? 0) * Number(model.pricing.completion ?? "0");
-  return promptCost + completionCost;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export function round(n: number, decimals = 4): number {
-  const f = 10 ** decimals;
-  return Math.round(n * f) / f;
-}
-
 // ---------- Client ----------
 
 export class OpenRouterClient {
-  private modelsCache: { models: OpenRouterModel[]; fetchedAt: number } | null =
-    null;
+  private modelsCache: { models: OpenRouterModel[]; fetchedAt: number } | null = null;
   /** De-duplicates concurrent catalog refreshes across parallel MCP requests. */
   private modelsInFlight: Promise<OpenRouterModel[]> | null = null;
 
@@ -195,10 +69,7 @@ export class OpenRouterClient {
     init?: { method?: string; body?: unknown; timeoutMs?: number }
   ): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      init?.timeoutMs ?? 120_000
-    );
+    const timeout = setTimeout(() => controller.abort(), init?.timeoutMs ?? 120_000);
     let res: Response;
     try {
       res = await fetch(`${this.cfg.openRouterBaseUrl}${path}`, {
@@ -213,11 +84,7 @@ export class OpenRouterClient {
           "Request to OpenRouter timed out. Try a smaller max_tokens or a faster model."
         );
       }
-      throw new OpenRouterError(
-        `Network error reaching OpenRouter: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
+      throw new OpenRouterError(`Network error reaching OpenRouter: ${errorMessage(err)}`);
     } finally {
       clearTimeout(timeout);
     }
@@ -292,9 +159,7 @@ export class OpenRouterClient {
     return models.find((m) => m.id === id);
   }
 
-  async chatCompletion(
-    params: ChatCompletionParams
-  ): Promise<ChatCompletionResult> {
+  async chatCompletion(params: ChatCompletionParams): Promise<ChatCompletionResult> {
     interface RawResponse {
       id: string;
       model: string;
@@ -316,17 +181,13 @@ export class OpenRouterClient {
     if (params.jsonMode) body.response_format = { type: "json_object" };
     if (params.reasoningEffort) {
       body.reasoning =
-        params.reasoningEffort === "none"
-          ? { enabled: false }
-          : { effort: params.reasoningEffort };
+        params.reasoningEffort === "none" ? { enabled: false } : { effort: params.reasoningEffort };
     }
     if (params.webSearch) {
       body.plugins = [
         {
           id: "web",
-          ...(params.webMaxResults !== undefined
-            ? { max_results: params.webMaxResults }
-            : {}),
+          ...(params.webMaxResults !== undefined ? { max_results: params.webMaxResults } : {}),
         },
       ];
     }

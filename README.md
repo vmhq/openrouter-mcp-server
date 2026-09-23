@@ -163,7 +163,7 @@ MAX_RESPONSE_CHARS=25000
 
 ## Environment variables
 
-See [.env.example](.env.example) — the main ones:
+See [.env.example](.env.example) — the main ones. Values are validated at startup: an invalid one (e.g. `PORT=abc`, `ALLOW_FREE_MODELS=maybe`, or only some of the `POCKETID_*` variables) stops the server with a message naming the variable, instead of silently falling back to the default. Empty variables count as unset.
 
 | Variable | Description |
 |---|---|
@@ -246,7 +246,7 @@ Setup:
 4. Copy the Client ID and Client Secret into `POCKETID_CLIENT_ID` / `POCKETID_CLIENT_SECRET`, and set the PocketID base URL in `POCKETID_ISSUER`.
 5. Set `MCP_PUBLIC_URL` to the server's public HTTPS URL.
 
-If the `POCKETID_*` variables are not set, the interactive `/oauth/authorize` flow shows an error; the static `MCP_AUTH_TOKEN` bearer keeps working in parallel for machine-to-machine access (curl, Codex, etc.).
+If the `POCKETID_*` variables are not set, OAuth is off entirely: the discovery and `/oauth/*` endpoints are not served, no state file is created, and tokens issued while OAuth was on are no longer accepted. The static `MCP_AUTH_TOKEN` bearer keeps working in parallel for machine-to-machine access (curl, Codex, etc.).
 
 OAuth state (registered clients, one-time codes, and SHA-256 hashes of the tokens — never the plaintext tokens) is persisted to `./data/oauth-state.json` (configurable via `MCP_OAUTH_STATE_PATH`). If the connector fails after a restart with wiped state, remove it in Claude and add it again so it re-registers.
 
@@ -271,7 +271,15 @@ The answer itself is returned as plain text with a compact metadata footer, rath
 npm run dev        # tsx watch
 npm run typecheck  # tsc over src/ and test/
 npm test           # typecheck + node:test suite
+npm run lint       # ESLint + Prettier check
+npm run format     # apply Prettier + ESLint fixes
 npm run build      # emit dist/
+```
+
+`test/fixtures/tools-list.json` pins the public tool contract (names, descriptions, input schemas). If you change a tool on purpose, refresh it with:
+
+```bash
+UPDATE_SNAPSHOTS=1 npm test
 ```
 
 ## How `openrouter_auto_delegate` picks a model

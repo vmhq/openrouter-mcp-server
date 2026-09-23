@@ -1,11 +1,6 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  READ_ONLY_ANNOTATIONS,
-  ToolContext,
-  errorResult,
-  jsonResult,
-  toErrorMessage,
-} from "./shared.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolContext } from "./context.js";
+import { READ_ONLY_ANNOTATIONS, jsonResult, withErrors } from "./result.js";
 
 export function registerCreditTools(server: McpServer, ctx: ToolContext): void {
   server.registerTool(
@@ -20,13 +15,6 @@ Returns: the key info object from OpenRouter (fields like label, usage, limit, l
       inputSchema: {},
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async () => {
-      try {
-        const info = await ctx.client.keyInfo();
-        return jsonResult({ key: info });
-      } catch (err) {
-        return errorResult(toErrorMessage(err));
-      }
-    }
+    withErrors(async () => jsonResult({ key: await ctx.client.keyInfo() }))
   );
 }

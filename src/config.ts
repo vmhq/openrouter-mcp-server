@@ -1,28 +1,12 @@
-import { config as loadEnv } from "dotenv";
+import { z } from "zod";
 
-loadEnv();
-
-function parseList(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-function parseOptionalNumber(value: string | undefined): number | undefined {
-  if (value === undefined || value.trim() === "") return undefined;
-  const n = Number(value);
-  if (Number.isNaN(n) || n < 0) return undefined;
-  return n;
-}
-
-function normalizePublicUrl(value: string | undefined): string | undefined {
-  const trimmed = value?.trim().replace(/\/$/, "");
-  if (!trimmed) return undefined;
-  // OAuth discovery URLs must be absolute; assume https when no scheme given.
-  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-}
+/**
+ * Server configuration, parsed and validated from environment variables.
+ *
+ * An invalid value is a startup error that names the variable, instead of
+ * being silently replaced by its default. An empty variable counts as unset
+ * (docker-compose often passes `VAR=`), except for EMPTY_IS_A_VALUE.
+ */
 
 export interface PocketIdSettings {
   issuer: string;
@@ -41,6 +25,10 @@ export interface ServerConfig {
   publicUrl?: string;
   /** PocketID OIDC identity provider for the interactive OAuth flow. */
   pocketId?: PocketIdSettings;
+  /** Where OAuth state (clients, codes, token hashes) is persisted. */
+  oauthStatePath: string;
+  /** Lifetime of OAuth-issued access tokens, in seconds. */
+  oauthTokenTtlS: number;
   appUrl?: string;
   appTitle?: string;
   defaultModel?: string;
@@ -66,70 +54,192 @@ export interface ServerConfig {
   maxResponseChars: number;
 }
 
-export function loadConfig(): ServerConfig {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    console.error(
-      "ERROR: OPENROUTER_API_KEY is required. Copy .env.example to .env and set your key."
-    );
-    process.exit(1);
+export class ConfigError extends Error {
+  constructor(public readonly issues: string[]) {
+    super(`Invalid configuration:\n${issues.map((i) => `  - ${i}`).join("\n")}`);
+    this.name = "ConfigError";
   }
+}
 
-  // PocketID identity provider: only enabled when all three vars are set.
-  const pocketIdIssuer = (process.env.POCKETID_ISSUER || "").replace(/\/$/, "");
-  const pocketIdClientId = process.env.POCKETID_CLIENT_ID || "";
-  const pocketIdClientSecret = process.env.POCKETID_CLIENT_SECRET || "";
+// ─── Field parsers ────────────────────────────────────────────────────────────
+
+const withoutTrailingSlash = (s: string) => s.replace(/\/$/, "");
+
+const optionalString = z.string().trim().optional();
+const number = <T extends z.ZodTypeAny>(schema: T) => z.coerce.number().pipe(schema);
+const nonNegative = z.number().finite().min(0);
+const count = z.number().int().min(0);
+const positiveInt = z.number().int().min(1);
+
+const list = z
+  .string()
+  .optional()
+  .transform((v) =>
+    (v ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  );
+
+const TRUE = ["true", "1", "yes", "on"];
+const FALSE = ["false", "0", "no", "off"];
+const boolean = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .refine((v) => TRUE.includes(v) || FALSE.includes(v), {
+    message: `expected one of ${[...TRUE, ...FALSE].join(", ")}`,
+  })
+  .transform((v) => TRUE.includes(v));
+
+/** OAuth discovery URLs must be absolute; assume https when no scheme given. */
+const publicUrl = optionalString.transform((v) => {
+  if (!v) return undefined;
+  const trimmed = withoutTrailingSlash(v);
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+});
+
+const DEFAULT_PREFERRED_PROVIDERS =
+  "openai,anthropic,google,meta-llama,mistralai,deepseek,qwen,x-ai,amazon";
+
+/** Variables where an explicitly empty value is meaningful rather than "unset". */
+const EMPTY_IS_A_VALUE = new Set(["PREFERRED_PROVIDERS"]);
+
+function blanksToUndefined(env: unknown): unknown {
+  if (typeof env !== "object" || env === null) return env;
+  return Object.fromEntries(
+    Object.entries(env).map(([k, v]) => [
+      k,
+      typeof v === "string" && v.trim() === "" && !EMPTY_IS_A_VALUE.has(k) ? undefined : v,
+    ])
+  );
+}
+
+// ─── Schema ───────────────────────────────────────────────────────────────────
+
+const envSchema = z.preprocess(
+  blanksToUndefined,
+  z
+    .object({
+      OPENROUTER_API_KEY: z.string({
+        required_error: "is required. Copy .env.example to .env and set your key.",
+      }),
+      OPENROUTER_BASE_URL: z
+        .string()
+        .url()
+        .default("https://openrouter.ai/api/v1")
+        .transform(withoutTrailingSlash),
+      PORT: number(z.number().int().min(1).max(65535)).default(3000),
+      MCP_AUTH_TOKEN: optionalString,
+      MCP_PUBLIC_URL: publicUrl,
+
+      POCKETID_ISSUER: z.string().trim().url().optional(),
+      POCKETID_CLIENT_ID: optionalString,
+      POCKETID_CLIENT_SECRET: optionalString,
+      POCKETID_SCOPES: z
+        .string()
+        .default("openid profile email")
+        .transform((v) => v.split(/\s+/).filter(Boolean)),
+      MCP_OAUTH_STATE_PATH: z.string().default("./data/oauth-state.json"),
+      MCP_OAUTH_TOKEN_TTL_S: number(positiveInt).default(2_592_000), // 30 days
+
+      APP_URL: optionalString,
+      APP_TITLE: optionalString,
+      DEFAULT_MODEL: optionalString,
+      MAX_PROMPT_PRICE_PER_M: number(nonNegative).optional(),
+      MAX_COMPLETION_PRICE_PER_M: number(nonNegative).optional(),
+      ALLOWED_MODELS: list,
+      BLOCKED_MODELS: list,
+      ALLOW_FREE_MODELS: boolean.default("true"),
+      // An explicitly empty value disables provider preference.
+      PREFERRED_PROVIDERS: z.string().default(DEFAULT_PREFERRED_PROVIDERS).pipe(list),
+      TIER_ECONOMY_MAX_PRICE: number(nonNegative).default(0.5),
+      TIER_BALANCED_MAX_PRICE: number(nonNegative).default(3),
+      TIER_QUALITY_MAX_PRICE: number(nonNegative).default(15),
+      MODELS_CACHE_TTL_SECONDS: number(nonNegative).default(300),
+      DEFAULT_MAX_TOKENS: number(positiveInt).default(4096),
+      REASONING_MIN_MAX_TOKENS: number(count).default(2000),
+      MAX_OUTPUT_TOKENS: number(positiveInt).default(32_000),
+      MAX_CONTINUATIONS: number(count).default(3),
+      MAX_RESPONSE_CHARS: number(positiveInt).default(25_000),
+    })
+    .superRefine((env, ctx) => {
+      const pocketIdVars = [
+        "POCKETID_ISSUER",
+        "POCKETID_CLIENT_ID",
+        "POCKETID_CLIENT_SECRET",
+      ] as const;
+      const missing = pocketIdVars.filter((k) => !env[k]);
+      if (missing.length > 0 && missing.length < pocketIdVars.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [missing[0]],
+          message: `is required when any POCKETID_* variable is set (missing: ${missing.join(", ")})`,
+        });
+      }
+      if (
+        env.TIER_ECONOMY_MAX_PRICE > env.TIER_BALANCED_MAX_PRICE ||
+        env.TIER_BALANCED_MAX_PRICE > env.TIER_QUALITY_MAX_PRICE
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["TIER_ECONOMY_MAX_PRICE"],
+          message:
+            "tier ceilings must satisfy TIER_ECONOMY_MAX_PRICE <= TIER_BALANCED_MAX_PRICE <= TIER_QUALITY_MAX_PRICE",
+        });
+      }
+    })
+);
+
+/**
+ * Parses the server configuration from `env` (process.env by default).
+ * Throws ConfigError listing every invalid variable.
+ */
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
+  const parsed = envSchema.safeParse(env);
+  if (!parsed.success) {
+    throw new ConfigError(
+      parsed.error.issues.map((issue) => `${issue.path.join(".")} ${issue.message}`)
+    );
+  }
+  const e = parsed.data;
+
   const pocketId: PocketIdSettings | undefined =
-    pocketIdIssuer && pocketIdClientId && pocketIdClientSecret
+    e.POCKETID_ISSUER && e.POCKETID_CLIENT_ID && e.POCKETID_CLIENT_SECRET
       ? {
-          issuer: pocketIdIssuer,
-          clientId: pocketIdClientId,
-          clientSecret: pocketIdClientSecret,
-          scopes: (process.env.POCKETID_SCOPES || "openid profile email")
-            .split(/\s+/)
-            .filter(Boolean),
+          issuer: withoutTrailingSlash(e.POCKETID_ISSUER),
+          clientId: e.POCKETID_CLIENT_ID,
+          clientSecret: e.POCKETID_CLIENT_SECRET,
+          scopes: e.POCKETID_SCOPES,
         }
       : undefined;
 
   return {
-    openRouterApiKey: apiKey,
-    openRouterBaseUrl: (
-      process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1"
-    ).replace(/\/$/, ""),
-    port: parseOptionalNumber(process.env.PORT) ?? 3000,
-    mcpAuthToken: process.env.MCP_AUTH_TOKEN || undefined,
-    publicUrl: normalizePublicUrl(process.env.MCP_PUBLIC_URL),
+    openRouterApiKey: e.OPENROUTER_API_KEY,
+    openRouterBaseUrl: e.OPENROUTER_BASE_URL,
+    port: e.PORT,
+    mcpAuthToken: e.MCP_AUTH_TOKEN,
+    publicUrl: e.MCP_PUBLIC_URL,
     pocketId,
-    appUrl: process.env.APP_URL || undefined,
-    appTitle: process.env.APP_TITLE || undefined,
-    defaultModel: process.env.DEFAULT_MODEL || undefined,
-    maxPromptPricePerM: parseOptionalNumber(process.env.MAX_PROMPT_PRICE_PER_M),
-    maxCompletionPricePerM: parseOptionalNumber(
-      process.env.MAX_COMPLETION_PRICE_PER_M
-    ),
-    allowedModels: parseList(process.env.ALLOWED_MODELS),
-    blockedModels: parseList(process.env.BLOCKED_MODELS),
-    allowFreeModels:
-      (process.env.ALLOW_FREE_MODELS ?? "true").toLowerCase() !== "false",
-    preferredProviders: parseList(
-      process.env.PREFERRED_PROVIDERS ??
-        "openai,anthropic,google,meta-llama,mistralai,deepseek,qwen,x-ai,amazon"
-    ),
-    tierEconomyMaxPrice:
-      parseOptionalNumber(process.env.TIER_ECONOMY_MAX_PRICE) ?? 0.5,
-    tierBalancedMaxPrice:
-      parseOptionalNumber(process.env.TIER_BALANCED_MAX_PRICE) ?? 3,
-    tierQualityMaxPrice:
-      parseOptionalNumber(process.env.TIER_QUALITY_MAX_PRICE) ?? 15,
-    modelsCacheTtlMs:
-      (parseOptionalNumber(process.env.MODELS_CACHE_TTL_SECONDS) ?? 300) * 1000,
-    defaultMaxTokens:
-      parseOptionalNumber(process.env.DEFAULT_MAX_TOKENS) ?? 4096,
-    reasoningMinMaxTokens:
-      parseOptionalNumber(process.env.REASONING_MIN_MAX_TOKENS) ?? 2000,
-    maxOutputTokens: parseOptionalNumber(process.env.MAX_OUTPUT_TOKENS) ?? 32_000,
-    maxContinuations: parseOptionalNumber(process.env.MAX_CONTINUATIONS) ?? 3,
-    maxResponseChars:
-      parseOptionalNumber(process.env.MAX_RESPONSE_CHARS) ?? 25_000,
+    oauthStatePath: e.MCP_OAUTH_STATE_PATH,
+    oauthTokenTtlS: e.MCP_OAUTH_TOKEN_TTL_S,
+    appUrl: e.APP_URL,
+    appTitle: e.APP_TITLE,
+    defaultModel: e.DEFAULT_MODEL,
+    maxPromptPricePerM: e.MAX_PROMPT_PRICE_PER_M,
+    maxCompletionPricePerM: e.MAX_COMPLETION_PRICE_PER_M,
+    allowedModels: e.ALLOWED_MODELS,
+    blockedModels: e.BLOCKED_MODELS,
+    allowFreeModels: e.ALLOW_FREE_MODELS,
+    preferredProviders: e.PREFERRED_PROVIDERS,
+    tierEconomyMaxPrice: e.TIER_ECONOMY_MAX_PRICE,
+    tierBalancedMaxPrice: e.TIER_BALANCED_MAX_PRICE,
+    tierQualityMaxPrice: e.TIER_QUALITY_MAX_PRICE,
+    modelsCacheTtlMs: e.MODELS_CACHE_TTL_SECONDS * 1000,
+    defaultMaxTokens: e.DEFAULT_MAX_TOKENS,
+    reasoningMinMaxTokens: e.REASONING_MIN_MAX_TOKENS,
+    maxOutputTokens: e.MAX_OUTPUT_TOKENS,
+    maxContinuations: e.MAX_CONTINUATIONS,
+    maxResponseChars: e.MAX_RESPONSE_CHARS,
   };
 }

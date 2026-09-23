@@ -1,22 +1,17 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import {
-  blendedPricePerM,
-  isFreeModel,
-  supportsTools,
-} from "../openrouter.js";
-import { isAllowedByPolicy } from "../selection.js";
-import { isReasoningModel, modelCompletionCap } from "../budget.js";
+import { isReasoningModel, supportsTools } from "../models/capabilities.js";
+import { isAllowedByPolicy } from "../models/policy.js";
+import { blendedPricePerM, isFreeModel } from "../models/pricing.js";
+import type { ToolContext } from "./context.js";
+import { modelSummary, summariesToMarkdown } from "./render.js";
 import {
   READ_ONLY_ANNOTATIONS,
-  ToolContext,
   errorResult,
   jsonResult,
-  modelSummary,
-  summariesToMarkdown,
   textResult,
-  toErrorMessage,
-} from "./shared.js";
+  withErrors,
+} from "./result.js";
 
 export function registerModelTools(server: McpServer, ctx: ToolContext): void {
   const { client, cfg } = ctx;
@@ -61,10 +56,7 @@ Returns: total/count/offset plus rows of {id, name, context_length, max_completi
           .boolean()
           .default(false)
           .describe("Only models supporting tool/function calling"),
-        include_free: z
-          .boolean()
-          .default(true)
-          .describe("Include free ($0) models"),
+        include_free: z.boolean().default(true).describe("Include free ($0) models"),
         sort: z
           .enum(["price", "context", "newest"])
           .default("price")
@@ -75,70 +67,62 @@ Returns: total/count/offset plus rows of {id, name, context_length, max_completi
       },
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (params) => {
-      try {
-        const all = await client.listModels();
-        let models = all.filter((m) => isAllowedByPolicy(m, cfg).allowed);
+    withErrors(async (params) => {
+      const all = await client.listModels();
+      let models = all.filter((m) => isAllowedByPolicy(m, cfg).allowed);
 
-        if (params.search) {
-          const q = params.search.toLowerCase();
-          models = models.filter(
-            (m) =>
-              m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
-          );
-        }
-        if (!params.include_free) models = models.filter((m) => !isFreeModel(m));
-        if (params.require_tools) models = models.filter(supportsTools);
-        if (params.min_context !== undefined) {
-          models = models.filter(
-            (m) => (m.context_length ?? 0) >= (params.min_context ?? 0)
-          );
-        }
-        if (params.max_blended_price_per_m !== undefined) {
-          models = models.filter(
-            (m) => blendedPricePerM(m) <= (params.max_blended_price_per_m ?? 0)
-          );
-        }
-
-        models.sort((a, b) => {
-          switch (params.sort) {
-            case "context":
-              return (b.context_length ?? 0) - (a.context_length ?? 0);
-            case "newest":
-              return (b.created ?? 0) - (a.created ?? 0);
-            default:
-              return blendedPricePerM(a) - blendedPricePerM(b);
-          }
-        });
-
-        const total = models.length;
-        const page = models.slice(params.offset, params.offset + params.limit);
-        const rows = page.map(modelSummary);
-        const hasMore = total > params.offset + rows.length;
-        const output = {
-          total,
-          count: rows.length,
-          offset: params.offset,
-          has_more: hasMore,
-          ...(hasMore ? { next_offset: params.offset + rows.length } : {}),
-          models: rows,
-        };
-
-        let text =
-          params.response_format === "markdown"
-            ? `Found ${total} models (showing ${rows.length} from offset ${params.offset}, sorted by ${params.sort}).\n\n` +
-              summariesToMarkdown(rows)
-            : JSON.stringify(output, null, 2);
-        if (text.length > cfg.maxResponseChars) {
-          text =
-            text.slice(0, cfg.maxResponseChars) +
-            "\n\n[Truncated. Use 'limit'/'offset' or add filters to narrow results.]";
-        }
-        return textResult(text, output);
-      } catch (err) {
-        return errorResult(toErrorMessage(err));
+      if (params.search) {
+        const q = params.search.toLowerCase();
+        models = models.filter(
+          (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+        );
       }
-    }
+      if (!params.include_free) models = models.filter((m) => !isFreeModel(m));
+      if (params.require_tools) models = models.filter(supportsTools);
+      const { min_context: minContext, max_blended_price_per_m: maxPrice } = params;
+      if (minContext !== undefined) {
+        models = models.filter((m) => (m.context_length ?? 0) >= minContext);
+      }
+      if (maxPrice !== undefined) {
+        models = models.filter((m) => blendedPricePerM(m) <= maxPrice);
+      }
+
+      models.sort((a, b) => {
+        switch (params.sort) {
+          case "context":
+            return (b.context_length ?? 0) - (a.context_length ?? 0);
+          case "newest":
+            return (b.created ?? 0) - (a.created ?? 0);
+          default:
+            return blendedPricePerM(a) - blendedPricePerM(b);
+        }
+      });
+
+      const total = models.length;
+      const page = models.slice(params.offset, params.offset + params.limit);
+      const rows = page.map(modelSummary);
+      const hasMore = total > params.offset + rows.length;
+      const output = {
+        total,
+        count: rows.length,
+        offset: params.offset,
+        has_more: hasMore,
+        ...(hasMore ? { next_offset: params.offset + rows.length } : {}),
+        models: rows,
+      };
+
+      let text =
+        params.response_format === "markdown"
+          ? `Found ${total} models (showing ${rows.length} from offset ${params.offset}, sorted by ${params.sort}).\n\n` +
+            summariesToMarkdown(rows)
+          : JSON.stringify(output, null, 2);
+      if (text.length > cfg.maxResponseChars) {
+        text =
+          text.slice(0, cfg.maxResponseChars) +
+          "\n\n[Truncated. Use 'limit'/'offset' or add filters to narrow results.]";
+      }
+      return textResult(text, output);
+    })
   );
 
   server.registerTool(
@@ -152,37 +136,28 @@ Args:
 
 Returns: the model record plus {is_reasoning_model, allowed_by_policy, policy_reason}.`,
       inputSchema: {
-        model: z
-          .string()
-          .min(1)
-          .max(200)
-          .describe("Exact model id, e.g. 'deepseek/deepseek-chat'"),
+        model: z.string().min(1).max(200).describe("Exact model id, e.g. 'deepseek/deepseek-chat'"),
       },
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async (params) => {
-      try {
-        const model = await client.getModel(params.model);
-        if (!model) {
-          return errorResult(
-            `Model '${params.model}' not found in the OpenRouter catalog. Use openrouter_list_models with a 'search' filter to find the right id.`
-          );
-        }
-        const policy = isAllowedByPolicy(model, cfg);
-        return jsonResult({
-          ...modelSummary(model),
-          description: model.description ?? "",
-          input_modalities: model.architecture?.input_modalities ?? ["text"],
-          output_modalities: model.architecture?.output_modalities ?? ["text"],
-          max_completion_tokens: modelCompletionCap(model) ?? null,
-          is_reasoning_model: isReasoningModel(model),
-          supported_parameters: model.supported_parameters ?? [],
-          allowed_by_policy: policy.allowed,
-          policy_reason: policy.reason ?? "allowed",
-        });
-      } catch (err) {
-        return errorResult(toErrorMessage(err));
+    withErrors(async (params) => {
+      const model = await client.getModel(params.model);
+      if (!model) {
+        return errorResult(
+          `Model '${params.model}' not found in the OpenRouter catalog. Use openrouter_list_models with a 'search' filter to find the right id.`
+        );
       }
-    }
+      const policy = isAllowedByPolicy(model, cfg);
+      return jsonResult({
+        ...modelSummary(model),
+        description: model.description ?? "",
+        input_modalities: model.architecture?.input_modalities ?? ["text"],
+        output_modalities: model.architecture?.output_modalities ?? ["text"],
+        is_reasoning_model: isReasoningModel(model),
+        supported_parameters: model.supported_parameters ?? [],
+        allowed_by_policy: policy.allowed,
+        policy_reason: policy.reason ?? "allowed",
+      });
+    })
   );
 }

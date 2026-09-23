@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DelegationError, runDelegation } from "../src/completion.js";
+import { DelegationError, runDelegation } from "../src/delegation/run.js";
 import { FakeClient, makeConfig, makeModel } from "./helpers.js";
 
 const cfg = makeConfig();
@@ -30,10 +30,7 @@ describe("runDelegation", () => {
   });
 
   it("feeds the partial answer back so the model resumes", async () => {
-    const client = new FakeClient([
-      { content: "abc", finishReason: "length" },
-      { content: "def" },
-    ]);
+    const client = new FakeClient([{ content: "abc", finishReason: "length" }, { content: "def" }]);
     await runDelegation(client, base, cfg);
     const second = client.calls[1].messages;
     assert.equal(second[0].content, "hi");
@@ -61,20 +58,14 @@ describe("runDelegation", () => {
 
   it("respects auto_continue=false", async () => {
     const client = new FakeClient([{ content: "cut", finishReason: "length" }]);
-    const out = await runDelegation(
-      client,
-      { ...base, autoContinue: false },
-      cfg
-    );
+    const out = await runDelegation(client, { ...base, autoContinue: false }, cfg);
     assert.equal(out.requests, 1);
     assert.equal(out.truncated, true);
     assert.match(out.notes.join(" "), /auto_continue is disabled/);
   });
 
   it("does not auto-continue in json_mode", async () => {
-    const client = new FakeClient([
-      { content: '{"a":', finishReason: "length" },
-    ]);
+    const client = new FakeClient([{ content: '{"a":', finishReason: "length" }]);
     const out = await runDelegation(client, { ...base, jsonMode: true }, cfg);
     assert.equal(out.requests, 1);
     assert.equal(out.truncated, true);
@@ -103,9 +94,7 @@ describe("runDelegation", () => {
       supported_parameters: ["reasoning"],
       top_provider: { max_completion_tokens: 2000 },
     });
-    const client = new FakeClient([
-      { content: "", finishReason: "length", reasoningTokens: 2000 },
-    ]);
+    const client = new FakeClient([{ content: "", finishReason: "length", reasoningTokens: 2000 }]);
     await assert.rejects(
       runDelegation(client, { model: reasoning, messages: base.messages }, cfg),
       (err: unknown) => {
@@ -132,11 +121,7 @@ describe("runDelegation", () => {
     const client = new FakeClient([
       { content: "a", finishReason: "length", completionTokens: 1000 },
     ]);
-    const out = await runDelegation(
-      client,
-      base,
-      makeConfig({ maxOutputTokens: 900 })
-    );
+    const out = await runDelegation(client, base, makeConfig({ maxOutputTokens: 900 }));
     assert.equal(out.requests, 1);
     assert.equal(out.truncated, true);
     assert.match(out.notes.join(" "), /MAX_OUTPUT_TOKENS/);
@@ -163,11 +148,7 @@ describe("explicit max_tokens", () => {
       { content: "aa", finishReason: "length", completionTokens: 60 },
       { content: "bb", finishReason: "stop", completionTokens: 30 },
     ]);
-    const out = await runDelegation(
-      client,
-      { ...base, maxTokens: 100 },
-      cfgLocal
-    );
+    const out = await runDelegation(client, { ...base, maxTokens: 100 }, cfgLocal);
     assert.equal(client.calls[0].maxTokens, 100);
     assert.equal(client.calls[1].maxTokens, 40); // 100 - 60 already produced
     assert.equal(out.content, "aabb");
@@ -177,11 +158,7 @@ describe("explicit max_tokens", () => {
     const client = new FakeClient([
       { content: "aa", finishReason: "length", completionTokens: 100 },
     ]);
-    const out = await runDelegation(
-      client,
-      { ...base, maxTokens: 100 },
-      cfgLocal
-    );
+    const out = await runDelegation(client, { ...base, maxTokens: 100 }, cfgLocal);
     assert.equal(out.requests, 1);
     assert.equal(out.truncated, true);
     assert.match(out.notes.join(" "), /raise max_tokens or leave it unset/);

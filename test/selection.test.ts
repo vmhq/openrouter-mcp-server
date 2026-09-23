@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { isAllowedByPolicy } from "../src/models/policy.js";
 import {
   blendedPricePerM,
   estimateCostUsd,
   isFreeModel,
   pricePerM,
-} from "../src/openrouter.js";
-import { isAllowedByPolicy, pickModelForTier } from "../src/selection.js";
+} from "../src/models/pricing.js";
+import { pickModelForTier } from "../src/models/selection.js";
 import { makeConfig, makeModel } from "./helpers.js";
 
 const priced = (id: string, prompt: number, completion: number) =>
@@ -70,11 +71,7 @@ describe("isAllowedByPolicy", () => {
 });
 
 describe("pickModelForTier", () => {
-  const catalog = [
-    priced("cheap/a", 0.1, 0.2),
-    priced("mid/b", 1, 2),
-    priced("pricey/c", 8, 10),
-  ];
+  const catalog = [priced("cheap/a", 0.1, 0.2), priced("mid/b", 1, 2), priced("pricey/c", 8, 10)];
 
   it("picks the cheapest model for the economy tier", () => {
     const pick = pickModelForTier(catalog, "economy", {}, makeConfig());
@@ -106,22 +103,12 @@ describe("pickModelForTier", () => {
   });
 
   it("reports when requirements exclude everything", () => {
-    const pick = pickModelForTier(
-      catalog,
-      "economy",
-      { minContext: 10_000_000 },
-      makeConfig()
-    );
+    const pick = pickModelForTier(catalog, "economy", { minContext: 10_000_000 }, makeConfig());
     assert.ok("error" in pick);
   });
 
   it("falls back to a neighbouring band when the tier is empty", () => {
-    const pick = pickModelForTier(
-      [priced("cheap/a", 0.1, 0.1)],
-      "quality",
-      {},
-      makeConfig()
-    );
+    const pick = pickModelForTier([priced("cheap/a", 0.1, 0.1)], "quality", {}, makeConfig());
     assert.ok(!("error" in pick));
     assert.equal(pick.model.id, "cheap/a");
     assert.match(pick.reason, /fell back/);

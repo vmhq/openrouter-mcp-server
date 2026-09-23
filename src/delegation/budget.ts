@@ -1,5 +1,6 @@
-import type { ServerConfig } from "./config.js";
-import type { OpenRouterModel, ReasoningEffort } from "./openrouter.js";
+import type { ServerConfig } from "../config.js";
+import { isReasoningModel, modelCompletionCap } from "../models/capabilities.js";
+import type { OpenRouterModel, ReasoningEffort } from "../openrouter/types.js";
 
 /**
  * Completion-budget resolution.
@@ -23,33 +24,9 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
-export function estimateMessageTokens(
-  messages: Array<{ role: string; content: string }>
-): number {
+export function estimateMessageTokens(messages: Array<{ role: string; content: string }>): number {
   // ~4 tokens of framing per message on top of the content itself.
-  return messages.reduce(
-    (sum, m) => sum + estimateTokens(m.content) + 4,
-    0
-  );
-}
-
-/**
- * A model whose max_tokens budget is consumed by internal chain-of-thought
- * before any visible text is produced.
- */
-export function isReasoningModel(model: OpenRouterModel): boolean {
-  const params = model.supported_parameters ?? [];
-  return (
-    params.includes("reasoning") ||
-    params.includes("include_reasoning") ||
-    params.includes("reasoning_effort")
-  );
-}
-
-/** Largest completion the model/provider will accept in a single request. */
-export function modelCompletionCap(model: OpenRouterModel): number | undefined {
-  const cap = model.top_provider?.max_completion_tokens;
-  return typeof cap === "number" && cap > 0 ? cap : undefined;
+  return messages.reduce((sum, m) => sum + estimateTokens(m.content) + 4, 0);
 }
 
 export interface BudgetInput {
@@ -77,10 +54,7 @@ export interface BudgetError {
   error: string;
 }
 
-export function resolveBudget(
-  input: BudgetInput,
-  cfg: ServerConfig
-): Budget | BudgetError {
+export function resolveBudget(input: BudgetInput, cfg: ServerConfig): Budget | BudgetError {
   const { model, promptTokens, requested, reasoningEffort } = input;
   const spent = input.spentTokens ?? 0;
   const notes: string[] = [];
@@ -100,17 +74,18 @@ export function resolveBudget(
     };
   }
 
-  const remainingOverall = Math.max(0, cfg.maxOutputTokens - spent);
+  const remainingOverall = cfg.maxOutputTokens - spent;
+  if (remainingOverall < 1) {
+    return {
+      error:
+        `The overall output budget of ${cfg.maxOutputTokens} tokens (MAX_OUTPUT_TOKENS) ` +
+        `is already used up.`,
+    };
+  }
   const providerCap = modelCompletionCap(model);
   const hardCap = Math.max(
     1,
-    Math.floor(
-      Math.min(
-        providerCap ?? Number.POSITIVE_INFINITY,
-        contextHeadroom,
-        remainingOverall || cfg.maxOutputTokens
-      )
-    )
+    Math.floor(Math.min(providerCap ?? Number.POSITIVE_INFINITY, contextHeadroom, remainingOverall))
   );
 
   let source: Budget["source"] = requested !== undefined ? "requested" : "default";
@@ -118,8 +93,7 @@ export function resolveBudget(
 
   // Reasoning models burn the budget on hidden tokens first: a caller asking
   // for 300 tokens of prose gets an empty answer. Raise the floor.
-  const reasoningActive =
-    isReasoningModel(model) && reasoningEffort !== "none";
+  const reasoningActive = isReasoningModel(model) && reasoningEffort !== "none";
   if (reasoningActive && want < cfg.reasoningMinMaxTokens) {
     notes.push(
       `raised max_tokens from ${want} to ${cfg.reasoningMinMaxTokens} because '${model.id}' ` +

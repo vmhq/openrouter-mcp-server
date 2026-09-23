@@ -12,7 +12,7 @@
  */
 
 const MAX_ENTRIES = 32;
-const TTL_MS = 30 * 60 * 1000;
+export const RESPONSE_TTL_MS = 30 * 60 * 1000;
 
 export interface StoredResponse {
   id: string;
@@ -35,7 +35,7 @@ export class ResponseStore {
 
   constructor(
     private maxEntries = MAX_ENTRIES,
-    private ttlMs = TTL_MS,
+    private ttlMs = RESPONSE_TTL_MS,
     private now: () => number = Date.now
   ) {}
 
@@ -85,11 +85,7 @@ export class ResponseStore {
 }
 
 /** Slices text into a page, clamping the bounds to the available range. */
-export function pageOf(
-  text: string,
-  offset: number,
-  limit: number
-): ResponsePage {
+export function pageOf(text: string, offset: number, limit: number): ResponsePage {
   const start = Math.max(0, Math.min(offset, text.length));
   const end = Math.min(text.length, start + Math.max(1, limit));
   return {

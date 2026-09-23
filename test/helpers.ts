@@ -3,13 +3,15 @@ import type {
   ChatCompletionParams,
   ChatCompletionResult,
   OpenRouterModel,
-} from "../src/openrouter.js";
+} from "../src/openrouter/types.js";
 
 export function makeConfig(overrides: Partial<ServerConfig> = {}): ServerConfig {
   return {
     openRouterApiKey: "test-key",
     openRouterBaseUrl: "https://openrouter.ai/api/v1",
     port: 3000,
+    oauthStatePath: "./data/oauth-state.json",
+    oauthTokenTtlS: 2_592_000,
     allowedModels: [],
     blockedModels: [],
     allowFreeModels: true,
@@ -53,9 +55,7 @@ export class FakeClient {
 
   constructor(private turns: ScriptedTurn[]) {}
 
-  async chatCompletion(
-    params: ChatCompletionParams
-  ): Promise<ChatCompletionResult> {
+  async chatCompletion(params: ChatCompletionParams): Promise<ChatCompletionResult> {
     this.calls.push(params);
     const turn = this.turns[this.calls.length - 1];
     if (!turn) throw new Error(`unexpected call #${this.calls.length}`);
