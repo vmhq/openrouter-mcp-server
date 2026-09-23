@@ -1,0 +1,453 @@
+[
+  {
+    "name": "openrouter_list_models",
+    "title": "List OpenRouter Models",
+    "description": "List the models currently available on OpenRouter with LIVE pricing (USD per 1M tokens), context window, per-request output cap, and tool-calling support. Use this to find cheap models before delegating with openrouter_delegate_task.\n\nPrices come straight from the OpenRouter catalog (cached for a few minutes). \"blended_price_per_m\" = 0.7*input + 0.3*output price, used for ranking. Models excluded by this server's .env policy (allow/block lists, price caps) are filtered out by default.\n\nArgs:\n  - search (string, optional): case-insensitive substring matched against model id and name (e.g. \"mini\", \"deepseek\", \"google/\").\n  - max_blended_price_per_m (number, optional): only models at or under this blended USD/M price.\n  - min_context (integer, optional): minimum context window in tokens.\n  - require_tools (boolean, default false): only models that support tool/function calling.\n  - include_free (boolean, default true): include $0 models (they often have strict rate limits).\n  - sort (enum, default \"price\"): \"price\" (cheapest first), \"context\" (largest first), or \"newest\".\n  - limit (1-100, default 20) / offset (default 0): pagination.\n  - response_format (\"markdown\" | \"json\", default \"markdown\").\n\nReturns: total/count/offset plus rows of {id, name, context_length, max_completion_tokens, prompt_price_per_m, completion_price_per_m, blended_price_per_m, supports_tools, free, modality}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Substring filter on model id/name, e.g. 'deepseek' or 'openai/'"
+        },
+        "max_blended_price_per_m": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Max blended price in USD per 1M tokens (0.7*input + 0.3*output)"
+        },
+        "min_context": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum context window in tokens, e.g. 128000"
+        },
+        "require_tools": {
+          "type": "boolean",
+          "default": false,
+          "description": "Only models supporting tool/function calling"
+        },
+        "include_free": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include free ($0) models"
+        },
+        "sort": {
+          "type": "string",
+          "enum": [
+            "price",
+            "context",
+            "newest"
+          ],
+          "default": "price",
+          "description": "Sort order: price (cheapest first), context (largest first), newest"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "response_format": {
+          "type": "string",
+          "enum": [
+            "markdown",
+            "json"
+          ],
+          "default": "markdown"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "openrouter_get_model",
+    "title": "Get OpenRouter Model Details",
+    "description": "Get full details for one OpenRouter model by exact id (e.g. \"openai/gpt-4.1-mini\"): description, live pricing per 1M tokens, context window, per-request output cap, whether it is a reasoning model, and whether this server's .env policy allows delegating to it.\n\nArgs:\n  - model (string): exact model id as returned by openrouter_list_models.\n\nReturns: the model record plus {is_reasoning_model, allowed_by_policy, policy_reason}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Exact model id, e.g. 'deepseek/deepseek-chat'"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "openrouter_delegate_task",
+    "title": "Delegate Task to a Specific Model",
+    "description": "Delegate a task to a SPECIFIC OpenRouter model and get back its answer plus token usage and estimated cost in USD. Use openrouter_list_models first to pick a cheap model that fits the task, then delegate here.\n\nThe server enforces its .env policy: blocked models or models above the configured price caps are rejected with an explanation.\n\nArgs:\n  - model (string, optional): exact model id. Falls back to DEFAULT_MODEL from .env; errors if neither is set.\n  - task (string): the prompt for the delegated model. Include ALL context it needs — it does not see this conversation.\n  - system_prompt (string, optional): system instructions for the delegated model.\n  - max_tokens (integer, optional): see \"Output budget\" below.\n  - auto_continue (boolean, default true): resume and stitch together answers cut off by the token limit.\n  - reasoning_effort (\"none\" | \"low\" | \"medium\" | \"high\", optional): reasoning budget for reasoning-capable models (\"none\" disables it). Ignored by models without reasoning support.\n  - temperature (0-2, optional).\n  - json_mode (boolean, default false): request a JSON-object response (only for models supporting response_format). Disables auto-continue, since a continuation would start a second JSON object.\n  - web_search (boolean, default false): let OpenRouter run a web search and inject the results into the prompt (works with any model). Costs ~$4 per 1000 results EXTRA, billed separately and NOT included in estimated_cost_usd; injected results also add prompt tokens.\n  - web_max_results (1-10, default 5): number of search results when web_search is on.\n\nOutput budget: you do NOT need to size max_tokens. The server derives a budget from the model's own context window and per-request output cap, raises it automatically for reasoning models (whose budget is eaten by hidden chain-of-thought), and if the answer is still cut off it resumes the model and stitches the pieces together (auto_continue, on by default). Pass max_tokens only to deliberately cap length or cost. If the final answer is still incomplete you get truncated=true plus a note saying so — never a silently clipped answer.\n\nLong answers: if the answer is larger than this server's inline limit you get the first page plus a response_id; fetch the remainder with openrouter_fetch_response.\n\nReturns: the answer as text, plus {model_used, finish_reason, truncated, usage:{prompt_tokens, completion_tokens, total_tokens, reasoning_tokens?}, estimated_cost_usd, continuations, notes?}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Exact model id; defaults to DEFAULT_MODEL from .env"
+        },
+        "task": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200000,
+          "description": "Self-contained prompt for the delegated model"
+        },
+        "json_mode": {
+          "type": "boolean",
+          "default": false
+        },
+        "system_prompt": {
+          "type": "string",
+          "maxLength": 50000,
+          "description": "System instructions for the delegated model"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200000,
+          "description": "OPTIONAL hard cap on completion tokens. Leave it unset unless you need to limit cost: the server picks a budget from the model's own limits and auto-continues answers cut off by it. A low value here is the usual cause of truncated answers."
+        },
+        "auto_continue": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically resume and stitch together answers cut off by the token limit"
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Reasoning budget on reasoning-capable models ('none' disables it). Ignored otherwise."
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "web_search": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let OpenRouter inject web search results into the prompt (extra cost)"
+        },
+        "web_max_results": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "task"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "openrouter_auto_delegate",
+    "title": "Auto-Delegate Task by Price Tier",
+    "description": "Delegate a task letting the SERVER pick the model automatically by price tier, using live OpenRouter pricing and the .env policy. Ideal for saving tokens/cost without browsing the catalog yourself.\n\nTiers (blended USD per 1M tokens = 0.7*input + 0.3*output; ceilings configurable in .env):\n  - \"economy\" (default): cheapest capable model — bulk/simple work (summaries, extraction, classification).\n  - \"balanced\": mid-price band — general drafting and reasoning.\n  - \"quality\": highest-priced model within the quality cap — harder tasks that still shouldn't use a flagship model.\n\nArgs:\n  - task (string): self-contained prompt for the delegated model (it does not see this conversation).\n  - tier (\"economy\" | \"balanced\" | \"quality\", default \"economy\").\n  - require_tools (boolean, default false): restrict to models with tool/function calling.\n  - min_context (integer, default 16000): minimum context window in tokens.\n  - system_prompt, max_tokens, auto_continue, reasoning_effort, temperature, web_search, web_max_results: same as openrouter_delegate_task. web_search costs extra (~$4/1000 results, not in estimated_cost_usd).\n\nOutput budget: you do NOT need to size max_tokens. The server derives a budget from the model's own context window and per-request output cap, raises it automatically for reasoning models (whose budget is eaten by hidden chain-of-thought), and if the answer is still cut off it resumes the model and stitches the pieces together (auto_continue, on by default). Pass max_tokens only to deliberately cap length or cost. If the final answer is still incomplete you get truncated=true plus a note saying so — never a silently clipped answer.\n\nLong answers: if the answer is larger than this server's inline limit you get the first page plus a response_id; fetch the remainder with openrouter_fetch_response.\n\nReturns: the answer as text, plus {model_used, selection_reason, runners_up, finish_reason, truncated, usage, estimated_cost_usd, continuations, notes?}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200000
+        },
+        "tier": {
+          "type": "string",
+          "enum": [
+            "economy",
+            "balanced",
+            "quality"
+          ],
+          "default": "economy"
+        },
+        "require_tools": {
+          "type": "boolean",
+          "default": false
+        },
+        "min_context": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 16000
+        },
+        "system_prompt": {
+          "type": "string",
+          "maxLength": 50000,
+          "description": "System instructions for the delegated model"
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200000,
+          "description": "OPTIONAL hard cap on completion tokens. Leave it unset unless you need to limit cost: the server picks a budget from the model's own limits and auto-continues answers cut off by it. A low value here is the usual cause of truncated answers."
+        },
+        "auto_continue": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically resume and stitch together answers cut off by the token limit"
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ],
+          "description": "Reasoning budget on reasoning-capable models ('none' disables it). Ignored otherwise."
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "web_search": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let OpenRouter inject web search results into the prompt (extra cost)"
+        },
+        "web_max_results": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "task"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "openrouter_fetch_response",
+    "title": "Fetch a Paged Delegation Response",
+    "description": "Read the remainder of a delegated answer that was too large to return inline. When a delegation tool reports \"response_paged\": true it also returns a response_id; call this tool with that id and the offset it reported to get the next chunk, repeating while has_more is true.\n\nArgs:\n  - response_id (string): id returned by openrouter_delegate_task / openrouter_auto_delegate.\n  - offset (integer, default 0): character offset to read from.\n  - length (integer, optional): characters to read; defaults to the server's inline limit.\n\nReturns: {text, offset, next_offset, total_chars, has_more}.\n\nResponses are kept in memory for 30 minutes and are lost on server restart; re-run the delegation if the id has expired.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "response_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200000
+        }
+      },
+      "required": [
+        "response_id"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "openrouter_decide",
+    "title": "Ask a Decision Model (System One)",
+    "description": "Ask a decision / \"System One\" model on OpenRouter — e.g. TypeSafe's Jev (\"~typesafe/jev-latest\") — typed questions about a piece of text. These models do NOT write text: they return a probability, a picked option, or a rubric score per question, with a confidence. They are very cheap and fast; use them for classification, routing, triage, moderation and yes/no checks instead of delegating to a text LLM.\n\nPut ONLY the material being judged in 'state' and the questions in 'questions' — a question written into the state is judged as text, not answered. Ask one simple judgement per question; combine several questions in code rather than asking a compound one. All questions go in a single request.\n\nArgs:\n  - model (string, default \"~typesafe/jev-latest\"): decision model id. Also accepts \"jev-latest\", \"jev-preview\" or a pinned version like \"typesafe/jev-1.13\".\n  - state (string): the text to judge (ticket, message, command, conversation...).\n  - questions (object): map of name -> question, each one of:\n      {type: \"noul\", instructions}: yes/no → answer {noul: probability of yes, 0-1}.\n      {type: \"choice\", instructions, criteria: {option: meaning, ...}} (1-255 options): pick one → {choice, probabilities, confidence}.\n      {type: \"score\", instructions, criteria: [lowest level, ..., highest level]} (ordered, >= 2): → {score, probabilities, confidence}.\n\nReturns: {model_used, provider, answers: {name: answer}, usage: {input_tokens, output_tokens}, cost_usd}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Decision model id; defaults to ~typesafe/jev-latest"
+        },
+        "state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200000,
+          "description": "The material to judge — no questions in here"
+        },
+        "questions": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "noul"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  }
+                },
+                "required": [
+                  "type",
+                  "instructions"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "choice"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  },
+                  "criteria": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  }
+                },
+                "required": [
+                  "type",
+                  "instructions",
+                  "criteria"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "score"
+                  },
+                  "instructions": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  },
+                  "criteria": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    },
+                    "minItems": 2,
+                    "maxItems": 255
+                  }
+                },
+                "required": [
+                  "type",
+                  "instructions",
+                  "criteria"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "description": "Map of question name -> typed question"
+        }
+      },
+      "required": [
+        "state",
+        "questions"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  {
+    "name": "openrouter_check_credits",
+    "title": "Check OpenRouter Key Usage",
+    "description": "Check the OpenRouter API key configured on this server: label, accumulated usage in USD, spending limit (if any), and whether it's on the free tier. Useful before delegating large batches of work.\n\nArgs: none.\n\nReturns: the key info object from OpenRouter (fields like label, usage, limit, limit_remaining, is_free_tier).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+]
