@@ -246,7 +246,7 @@ Setup:
 4. Copy the Client ID and Client Secret into `POCKETID_CLIENT_ID` / `POCKETID_CLIENT_SECRET`, and set the PocketID base URL in `POCKETID_ISSUER`.
 5. Set `MCP_PUBLIC_URL` to the server's public HTTPS URL.
 
-If the `POCKETID_*` variables are not set, the interactive `/oauth/authorize` flow shows an error; the static `MCP_AUTH_TOKEN` bearer keeps working in parallel for machine-to-machine access (curl, Codex, etc.).
+If the `POCKETID_*` variables are not set, OAuth is off entirely: the discovery and `/oauth/*` endpoints are not served, no state file is created, and tokens issued while OAuth was on are no longer accepted. The static `MCP_AUTH_TOKEN` bearer keeps working in parallel for machine-to-machine access (curl, Codex, etc.).
 
 OAuth state (registered clients, one-time codes, and SHA-256 hashes of the tokens — never the plaintext tokens) is persisted to `./data/oauth-state.json` (configurable via `MCP_OAUTH_STATE_PATH`). If the connector fails after a restart with wiped state, remove it in Claude and add it again so it re-registers.
 

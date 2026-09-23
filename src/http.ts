@@ -1,5 +1,5 @@
 import type { ErrorRequestHandler, NextFunction, Request, RequestHandler, Response } from "express";
-import { constantTimeEqual } from "./oauth/state.js";
+import { constantTimeEqual } from "./crypto.js";
 
 /**
  * Express 4 ignores the promise an async handler returns, so a rejection

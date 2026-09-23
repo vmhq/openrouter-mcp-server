@@ -1,5 +1,5 @@
 /**
- * OAuth 2.1 HTTP endpoint handlers and token verification (Express).
+ * OAuth 2.1 HTTP endpoint handlers (Express).
  *
  * Standards implemented:
  *   RFC 6749  – OAuth 2.0
@@ -9,43 +9,27 @@
  *   RFC 8707  – Resource Indicators
  *   RFC 9728  – OAuth 2.0 Protected Resource Metadata
  */
-import { randomBytes } from "node:crypto";
 import type { Request, Response } from "express";
-import {
-  accessTokens,
-  clients,
-  codes,
-  CODE_TTL_MS,
-  pendingAuth,
-  PENDING_TTL_MS,
-  pruneExpiredOAuthState,
-  saveState,
-  sha256,
-  TOKEN_TTL_S,
-  type RegisteredClient,
-} from "./state.js";
+import { randomToken, sha256 } from "../crypto.js";
+import { errorMessage } from "../util.js";
+import type { PocketIdClient } from "./pocketid.js";
 import { expandRedirectUris, isRegistrableRedirectUri, redirectUriMatches } from "./redirectUri.js";
+import type { OAuthStore } from "./store.js";
 import {
   buildAuthorizationRedirectUrl,
   renderAuthorizeConsent,
   renderAuthorizeError,
   renderAuthorizeSuccess,
 } from "./views.js";
-import { buildPocketIdAuthUrl, exchangePocketIdCode, type PocketIdConfig } from "./pocketid.js";
 
-export type OAuthConfig = {
+export interface OAuthDeps {
+  store: OAuthStore;
+  /** Upstream identity provider for the human sign-in step. */
+  idp: PocketIdClient;
+  /** Public base URL of this server; derived from the request when unset. */
   publicUrl?: string;
   iconUrl?: string;
-  /** PocketID identity provider. When unset, interactive authorization is disabled. */
-  pocketId?: PocketIdConfig;
-};
-
-export type AuthInfo = {
-  token: string;
-  clientId: string;
-  scopes: string[];
-  expiresAt: number;
-};
+}
 
 // ─── CORS headers (required for browser-based OAuth discovery) ────────────────
 
@@ -59,35 +43,54 @@ function oauthError(res: Response, error: string, status = 400): void {
   res.status(status).set(OAUTH_CORS_HEADERS).json({ error });
 }
 
-// ─── URL helpers ──────────────────────────────────────────────────────────────
+// ─── Request helpers ──────────────────────────────────────────────────────────
 
-function baseUrl(config: OAuthConfig, req: Request): string {
-  if (config.publicUrl) return config.publicUrl.replace(/\/$/, "");
+function bodyOf(req: Request): Record<string, unknown> {
+  return typeof req.body === "object" && req.body !== null
+    ? (req.body as Record<string, unknown>)
+    : {};
+}
+
+function queryParam(req: Request, key: string): string {
+  const v = req.query[key];
+  return typeof v === "string" ? v : "";
+}
+
+export function baseUrl(publicUrl: string | undefined, req: Request): string {
+  if (publicUrl) return publicUrl.replace(/\/$/, "");
   return `${req.protocol}://${req.get("host") ?? "localhost"}`;
 }
 
 /** Redirect URI registered with PocketID for this server (the OIDC callback). */
-function callbackUri(config: OAuthConfig, req: Request): string {
-  return `${baseUrl(config, req)}/oauth/callback`;
+function callbackUri(deps: OAuthDeps, req: Request): string {
+  return `${baseUrl(deps.publicUrl, req)}/oauth/callback`;
 }
 
 // ─── Discovery metadata ───────────────────────────────────────────────────────
 
-/** 401 response with RFC 9728 WWW-Authenticate header */
-export function sendUnauthorized(config: OAuthConfig, req: Request, res: Response): void {
-  const root = baseUrl(config, req);
+/**
+ * 401 for /mcp. With OAuth enabled the RFC 9728 WWW-Authenticate header
+ * points clients at the protected-resource metadata; without it there is
+ * nothing to discover, so only the static bearer scheme is announced.
+ */
+export function sendUnauthorized(
+  opts: { publicUrl?: string; oauthEnabled: boolean },
+  req: Request,
+  res: Response
+): void {
+  const root = baseUrl(opts.publicUrl, req);
+  const challenge = opts.oauthEnabled
+    ? `Bearer realm="${root}", resource_metadata="${root}/.well-known/oauth-protected-resource"`
+    : `Bearer realm="${root}"`;
   res
     .status(401)
-    .set({
-      "WWW-Authenticate": `Bearer realm="${root}", resource_metadata="${root}/.well-known/oauth-protected-resource"`,
-      ...OAUTH_CORS_HEADERS,
-    })
+    .set({ "WWW-Authenticate": challenge, ...OAUTH_CORS_HEADERS })
     .json({ error: "unauthorized" });
 }
 
 /** RFC 9728 – /.well-known/oauth-protected-resource */
-export function protectedResourceMetadata(config: OAuthConfig, req: Request, res: Response): void {
-  const root = baseUrl(config, req);
+export function protectedResourceMetadata(deps: OAuthDeps, req: Request, res: Response): void {
+  const root = baseUrl(deps.publicUrl, req);
   res.set(OAUTH_CORS_HEADERS).json({
     resource: `${root}/mcp`,
     authorization_servers: [root],
@@ -97,12 +100,8 @@ export function protectedResourceMetadata(config: OAuthConfig, req: Request, res
 }
 
 /** RFC 8414 – /.well-known/oauth-authorization-server */
-export function authorizationServerMetadata(
-  config: OAuthConfig,
-  req: Request,
-  res: Response
-): void {
-  const root = baseUrl(config, req);
+export function authorizationServerMetadata(deps: OAuthDeps, req: Request, res: Response): void {
+  const root = baseUrl(deps.publicUrl, req);
   res.set(OAUTH_CORS_HEADERS).json({
     issuer: root,
     authorization_endpoint: `${root}/oauth/authorize`,
@@ -114,15 +113,14 @@ export function authorizationServerMetadata(
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
     scopes_supported: ["mcp"],
-    ...(config.iconUrl ? { logo_uri: config.iconUrl } : {}),
+    ...(deps.iconUrl ? { logo_uri: deps.iconUrl } : {}),
   });
 }
 
 // ─── RFC 7591 – dynamic client registration ───────────────────────────────────
 
-export function registerClient(req: Request, res: Response): void {
-  const body: Record<string, unknown> =
-    typeof req.body === "object" && req.body !== null ? (req.body as Record<string, unknown>) : {};
+export function registerClient(deps: OAuthDeps, req: Request, res: Response): void {
+  const body = bodyOf(req);
 
   const redirectUris = expandRedirectUris(
     Array.isArray(body.redirect_uris)
@@ -137,25 +135,21 @@ export function registerClient(req: Request, res: Response): void {
     return;
   }
 
-  const clientId = `ormcp_${randomBytes(18).toString("base64url")}`;
-  const clientIdIssuedAt = Math.floor(Date.now() / 1000);
-  const client: RegisteredClient = {
-    clientId,
-    clientIdIssuedAt,
+  const client = deps.store.registerClient({
     redirectUris,
     clientName: typeof body.client_name === "string" ? body.client_name.slice(0, 256) : undefined,
-  };
-  clients.set(clientId, client);
-  saveState();
+  });
 
-  console.error(`oauth_client_registered: ${clientId} (${redirectUris.length} redirect URIs)`);
+  console.error(
+    `oauth_client_registered: ${client.clientId} (${redirectUris.length} redirect URIs)`
+  );
 
   res
     .status(201)
     .set(OAUTH_CORS_HEADERS)
     .json({
-      client_id: clientId,
-      client_id_issued_at: clientIdIssuedAt,
+      client_id: client.clientId,
+      client_id_issued_at: client.clientIdIssuedAt,
       redirect_uris: redirectUris,
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code"],
@@ -169,48 +163,27 @@ export function registerClient(req: Request, res: Response): void {
 
 /**
  * Entry point for the MCP client's authorization request. Validates the client,
- * redirect URI, and PKCE, stores a pending transaction, then redirects the
- * browser to PocketID for the actual user authentication. PocketID returns to
- * GET /oauth/callback once the user signs in.
+ * redirect URI, and PKCE, stores a pending transaction, then shows a page that
+ * sends the browser to PocketID for the actual user authentication. PocketID
+ * returns to GET /oauth/callback once the user signs in.
  */
-export async function beginAuthorize(
-  req: Request,
-  res: Response,
-  config: OAuthConfig
-): Promise<void> {
-  if (!config.pocketId) {
-    console.error("oauth_pocketid_not_configured");
-    renderAuthorizeError(
-      res,
-      "Identity provider is not configured. Set POCKETID_ISSUER, POCKETID_CLIENT_ID and POCKETID_CLIENT_SECRET."
-    );
+export async function beginAuthorize(deps: OAuthDeps, req: Request, res: Response): Promise<void> {
+  const clientId = queryParam(req, "client_id");
+  const redirectUri = queryParam(req, "redirect_uri");
+  const codeChallenge = queryParam(req, "code_challenge");
+  const codeChallengeMethod = queryParam(req, "code_challenge_method");
+  const state = queryParam(req, "state");
+  const scope = queryParam(req, "scope") || "mcp";
+  const resource = queryParam(req, "resource");
+
+  // RFC 8707 §2.1: the resource parameter must be an absolute URI.
+  if (resource && !URL.canParse(resource)) {
+    renderAuthorizeError(res, "The resource indicator must be a valid absolute URL.");
     return;
   }
 
-  const get = (k: string) => {
-    const v = req.query[k];
-    return typeof v === "string" ? v : "";
-  };
-  const clientId = get("client_id");
-  const redirectUri = get("redirect_uri");
-  const codeChallenge = get("code_challenge");
-  const codeChallengeMethod = get("code_challenge_method");
-  const state = get("state");
-  const scope = get("scope") || "mcp";
-  const resource = get("resource");
-
-  // RFC 8707 §2.1: the resource parameter must be an absolute URI.
-  if (resource) {
-    try {
-      new URL(resource);
-    } catch {
-      renderAuthorizeError(res, "The resource indicator must be a valid absolute URL.");
-      return;
-    }
-  }
-
   // 1. Client must exist and redirect URI must be registered (port-agnostic for loopback)
-  const client = clients.get(clientId);
+  const client = deps.store.getClient(clientId);
   if (!client) {
     console.error(`oauth_authorize_client_not_found: ${clientId}`);
     renderAuthorizeError(
@@ -236,12 +209,9 @@ export async function beginAuthorize(
     return;
   }
 
-  // 3. Stash the pending request and redirect the user to PocketID
-  pruneExpiredOAuthState();
-
-  const txn = randomBytes(24).toString("base64url");
-  const pkceVerifier = randomBytes(32).toString("base64url");
-  pendingAuth.set(txn, {
+  // 3. Stash the pending request and send the user to PocketID
+  const pkceVerifier = randomToken(32);
+  const txn = deps.store.beginPending({
     clientId,
     redirectUri,
     codeChallenge,
@@ -249,23 +219,17 @@ export async function beginAuthorize(
     scopes: scope.split(/\s+/).filter(Boolean),
     resource: resource || undefined,
     pkceVerifier,
-    expiresAt: Date.now() + PENDING_TTL_MS,
   });
-  saveState();
 
   let authUrl: string;
   try {
-    authUrl = await buildPocketIdAuthUrl(config.pocketId, callbackUri(config, req), {
+    authUrl = await deps.idp.authorizationUrl(callbackUri(deps, req), {
       state: txn,
       codeChallenge: sha256(pkceVerifier),
     });
   } catch (err) {
-    pendingAuth.delete(txn);
-    saveState();
-    console.error(
-      "oauth_pocketid_discovery_failed:",
-      err instanceof Error ? err.message : String(err)
-    );
+    deps.store.cancelPending(txn);
+    console.error("oauth_pocketid_discovery_failed:", errorMessage(err));
     renderAuthorizeError(res, "Could not reach the identity provider. Please try again later.");
     return;
   }
@@ -280,18 +244,10 @@ export async function beginAuthorize(
  * code, then issues our own authorization code bound to the original MCP client
  * request and redirects the browser back to the MCP client's redirect URI.
  */
-export async function oauthCallback(
-  req: Request,
-  res: Response,
-  config: OAuthConfig
-): Promise<void> {
-  const get = (k: string) => {
-    const v = req.query[k];
-    return typeof v === "string" ? v : "";
-  };
-  const code = get("code");
-  const txn = get("state");
-  const providerError = get("error");
+export async function oauthCallback(deps: OAuthDeps, req: Request, res: Response): Promise<void> {
+  const code = queryParam(req, "code");
+  const txn = queryParam(req, "state");
+  const providerError = queryParam(req, "error");
 
   if (providerError) {
     console.error(`oauth_pocketid_returned_error: ${providerError}`);
@@ -300,13 +256,8 @@ export async function oauthCallback(
   }
 
   // Single-use: consume the pending transaction immediately
-  const pending = pendingAuth.get(txn);
-  if (pending) {
-    pendingAuth.delete(txn);
-    saveState();
-  }
-
-  if (!pending || pending.expiresAt < Date.now()) {
+  const pending = deps.store.consumePending(txn);
+  if (!pending) {
     console.error("oauth_callback_unknown_transaction");
     renderAuthorizeError(
       res,
@@ -318,17 +269,8 @@ export async function oauthCallback(
     renderAuthorizeError(res, "Missing authorization code from the identity provider.");
     return;
   }
-  if (!config.pocketId) {
-    renderAuthorizeError(res, "Identity provider is not configured.");
-    return;
-  }
 
-  const result = await exchangePocketIdCode(
-    config.pocketId,
-    callbackUri(config, req),
-    code,
-    pending.pkceVerifier
-  );
+  const result = await deps.idp.exchangeCode(callbackUri(deps, req), code, pending.pkceVerifier);
   if (!result.ok) {
     console.error(`oauth_pocketid_exchange_failed: ${result.error}`);
     renderAuthorizeError(res, "Sign-in with the identity provider failed. Please try again.");
@@ -336,16 +278,13 @@ export async function oauthCallback(
   }
 
   // Issue our own authorization code bound to the original MCP client request
-  const mcpCode = randomBytes(24).toString("base64url");
-  codes.set(mcpCode, {
+  const mcpCode = deps.store.issueCode({
     clientId: pending.clientId,
     redirectUri: pending.redirectUri,
     codeChallenge: pending.codeChallenge,
     scopes: pending.scopes.length ? pending.scopes : ["mcp"],
     resource: pending.resource,
-    expiresAt: Date.now() + CODE_TTL_MS,
   });
-  saveState();
 
   const redirectUrl = buildAuthorizationRedirectUrl(pending.redirectUri, mcpCode, pending.state);
 
@@ -355,16 +294,12 @@ export async function oauthCallback(
 
 // ─── POST /oauth/token ────────────────────────────────────────────────────────
 
-export function exchangeToken(req: Request, res: Response): void {
-  const body: Record<string, unknown> =
-    typeof req.body === "object" && req.body !== null ? (req.body as Record<string, unknown>) : {};
+export function exchangeToken(deps: OAuthDeps, req: Request, res: Response): void {
+  const body = bodyOf(req);
   const param = (k: string) => (body[k] !== undefined && body[k] !== null ? String(body[k]) : "");
 
   const grantType = param("grant_type");
-  const code = param("code");
-  const redirectUri = param("redirect_uri");
   const clientId = param("client_id");
-  const codeVerifier = param("code_verifier");
   const resource = param("resource");
 
   if (grantType !== "authorization_code") {
@@ -372,21 +307,19 @@ export function exchangeToken(req: Request, res: Response): void {
     return;
   }
 
-  const ac = codes.get(code);
-  // Single-use: delete immediately (even on failure)
-  if (codes.delete(code)) saveState();
-
-  if (!ac || ac.expiresAt < Date.now() || ac.clientId !== clientId) {
+  // Single-use: consumed immediately (even if rejected below)
+  const ac = deps.store.consumeCode(param("code"));
+  if (!ac || ac.clientId !== clientId) {
     oauthError(res, "invalid_grant");
     return;
   }
   // RFC 8252 §7.3: match redirect URI port-agnostic for loopback
-  if (!redirectUriMatches(redirectUri, ac.redirectUri)) {
+  if (!redirectUriMatches(param("redirect_uri"), ac.redirectUri)) {
     oauthError(res, "invalid_grant");
     return;
   }
   // PKCE S256 verification
-  if (sha256(codeVerifier) !== ac.codeChallenge) {
+  if (sha256(param("code_verifier")) !== ac.codeChallenge) {
     oauthError(res, "invalid_grant");
     return;
   }
@@ -396,62 +329,31 @@ export function exchangeToken(req: Request, res: Response): void {
     return;
   }
 
-  const accessToken = `ormcp_at_${randomBytes(32).toString("base64url")}`;
-  const expiresAt = Date.now() + TOKEN_TTL_S * 1000;
-  accessTokens.set(sha256(accessToken), {
+  const accessToken = deps.store.issueToken({
     clientId,
     scopes: ac.scopes,
     resource: ac.resource,
-    expiresAt,
   });
-  saveState();
+  const ttl = deps.store.tokenTtlS;
 
-  console.error(`oauth_access_token_issued: ${clientId} (expires in ${TOKEN_TTL_S}s)`);
+  console.error(`oauth_access_token_issued: ${clientId} (expires in ${ttl}s)`);
 
   res.set(OAUTH_CORS_HEADERS).json({
     access_token: accessToken,
     token_type: "Bearer",
-    expires_in: TOKEN_TTL_S,
+    expires_in: ttl,
     scope: ac.scopes.join(" "),
   });
 }
 
 // ─── POST /oauth/revoke ───────────────────────────────────────────────────────
 
-export function revokeToken(req: Request, res: Response): void {
-  const body: Record<string, unknown> =
-    typeof req.body === "object" && req.body !== null ? (req.body as Record<string, unknown>) : {};
-  const token = typeof body.token === "string" ? body.token : "";
-  if (!token) {
+export function revokeToken(deps: OAuthDeps, req: Request, res: Response): void {
+  const token = bodyOf(req).token;
+  if (typeof token !== "string" || !token) {
     oauthError(res, "invalid_request");
     return;
   }
-
-  const existed = accessTokens.delete(sha256(token));
-  if (existed) saveState();
-
+  deps.store.revokeToken(token);
   res.set(OAUTH_CORS_HEADERS).json({});
-}
-
-// ─── Token verification ───────────────────────────────────────────────────────
-
-/**
- * Verifies an OAuth access token and returns structured AuthInfo.
- * Returns undefined if the token is invalid or expired.
- */
-export function verifyAccessToken(token: string): AuthInfo | undefined {
-  if (!token) return undefined;
-  const hash = sha256(token);
-  const stored = accessTokens.get(hash);
-  if (!stored) return undefined;
-  if (stored.expiresAt <= Date.now()) {
-    accessTokens.delete(hash);
-    return undefined;
-  }
-  return {
-    token,
-    clientId: stored.clientId,
-    scopes: stored.scopes,
-    expiresAt: Math.floor(stored.expiresAt / 1000),
-  };
 }

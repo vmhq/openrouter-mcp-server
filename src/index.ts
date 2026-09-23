@@ -14,20 +14,11 @@ import { loadConfig } from "./config.js";
 import { OPENROUTER_ICON_CDN_URL, OPENROUTER_ICON_DATA_URI } from "./icon.js";
 import { OpenRouterClient } from "./openrouter.js";
 import { createToolContext, registerTools } from "./tools/index.js";
-import {
-  authorizationServerMetadata,
-  beginAuthorize,
-  exchangeToken,
-  oauthCallback,
-  OAUTH_CORS_HEADERS,
-  protectedResourceMetadata,
-  registerClient,
-  revokeToken,
-  sendUnauthorized,
-  verifyAccessToken,
-  type OAuthConfig,
-} from "./oauth/endpoints.js";
-import { asyncHandler, bearerAuth, errorHandler } from "./http.js";
+import { OAUTH_CORS_HEADERS, sendUnauthorized } from "./oauth/handlers.js";
+import { PocketIdClient } from "./oauth/pocketid.js";
+import { createOAuthRouter } from "./oauth/router.js";
+import { OAuthStore } from "./oauth/store.js";
+import { bearerAuth, errorHandler } from "./http.js";
 
 const cfg = loadConfig();
 const client = new OpenRouterClient(cfg);
@@ -64,68 +55,39 @@ const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
-// OAuth authorization server + PocketID identity provider.
-//
-// This server is the OAuth 2.1 authorization server toward MCP clients
-// (dynamic client registration + PKCE + token issuance); PocketID is the
-// upstream OIDC identity provider for the human login step. The static
-// MCP_AUTH_TOKEN bearer keeps working for machine-to-machine access.
-const oauthCfg: OAuthConfig = {
-  publicUrl: cfg.publicUrl,
-  iconUrl: OPENROUTER_ICON_CDN_URL,
-  pocketId: cfg.pocketId,
-};
-const oauthEnabled = Boolean(cfg.pocketId);
-
-// CORS preflight for OAuth discovery and endpoints (browser-based clients).
+// CORS preflight for /mcp and the OAuth endpoints (browser-based clients).
 app.options(["/mcp", "/.well-known/*", "/oauth/*"], (_req, res) => {
   res.status(204).set(OAUTH_CORS_HEADERS).end();
 });
 
-// RFC 9728 – protected resource metadata (also under /mcp path suffix,
-// which some clients request per the MCP authorization spec).
-app.get(
-  ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"],
-  (req, res) => protectedResourceMetadata(oauthCfg, req, res)
-);
-
-// RFC 8414 – authorization server metadata (+ OIDC alias some clients probe).
-app.get(
-  [
-    "/.well-known/oauth-authorization-server",
-    "/.well-known/oauth-authorization-server/mcp",
-    "/.well-known/openid-configuration",
-  ],
-  (req, res) => authorizationServerMetadata(oauthCfg, req, res)
-);
-
-// RFC 7591 – public dynamic client registration.
-app.post("/oauth/register", (req, res) => registerClient(req, res));
-
-// Interactive authorization: validates the MCP client request, then bounces
-// the browser to PocketID for passkey sign-in.
-app.get(
-  "/oauth/authorize",
-  asyncHandler((req, res) => beginAuthorize(req, res, oauthCfg))
-);
-
-// PocketID returns here; we issue our own code back to the MCP client.
-app.get(
-  "/oauth/callback",
-  asyncHandler((req, res) => oauthCallback(req, res, oauthCfg))
-);
-
-// Code → access token exchange (PKCE-verified) and revocation.
-app.post("/oauth/token", (req, res) => exchangeToken(req, res));
-app.post("/oauth/revoke", (req, res) => revokeToken(req, res));
+// Interactive OAuth sign-in via PocketID, only when it is configured. The
+// static MCP_AUTH_TOKEN bearer keeps working alongside it for
+// machine-to-machine access.
+let oauthStore: OAuthStore | undefined;
+if (cfg.pocketId) {
+  oauthStore = new OAuthStore({ path: cfg.oauthStatePath, tokenTtlS: cfg.oauthTokenTtlS });
+  oauthStore.load();
+  oauthStore.checkWritable();
+  oauthStore.startPruning();
+  app.use(
+    createOAuthRouter({
+      store: oauthStore,
+      idp: new PocketIdClient(cfg.pocketId),
+      publicUrl: cfg.publicUrl,
+      iconUrl: OPENROUTER_ICON_CDN_URL,
+    })
+  );
+}
+const store = oauthStore;
 
 // Bearer protection for /mcp: the static MCP_AUTH_TOKEN and/or OAuth tokens.
 app.use(
   "/mcp",
   bearerAuth({
     staticToken: cfg.mcpAuthToken,
-    verifyToken: oauthEnabled ? (token) => verifyAccessToken(token) !== undefined : undefined,
-    onUnauthorized: (req, res) => sendUnauthorized(oauthCfg, req, res),
+    verifyToken: store ? (token) => store.verifyToken(token) !== undefined : undefined,
+    onUnauthorized: (req, res) =>
+      sendUnauthorized({ publicUrl: cfg.publicUrl, oauthEnabled: Boolean(store) }, req, res),
   })
 );
 

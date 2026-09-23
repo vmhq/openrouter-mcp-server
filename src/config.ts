@@ -41,6 +41,10 @@ export interface ServerConfig {
   publicUrl?: string;
   /** PocketID OIDC identity provider for the interactive OAuth flow. */
   pocketId?: PocketIdSettings;
+  /** Where OAuth state (clients, codes, token hashes) is persisted. */
+  oauthStatePath: string;
+  /** Lifetime of OAuth-issued access tokens, in seconds. */
+  oauthTokenTtlS: number;
   appUrl?: string;
   appTitle?: string;
   defaultModel?: string;
@@ -91,6 +95,12 @@ export function loadConfig(): ServerConfig {
         }
       : undefined;
 
+  const oauthTokenTtlS = parseOptionalNumber(process.env.MCP_OAUTH_TOKEN_TTL_S) ?? 2_592_000;
+  if (oauthTokenTtlS <= 0) {
+    console.error("ERROR: MCP_OAUTH_TOKEN_TTL_S must be a positive number of seconds.");
+    process.exit(1);
+  }
+
   return {
     openRouterApiKey: apiKey,
     openRouterBaseUrl: (process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1").replace(
@@ -101,6 +111,8 @@ export function loadConfig(): ServerConfig {
     mcpAuthToken: process.env.MCP_AUTH_TOKEN || undefined,
     publicUrl: normalizePublicUrl(process.env.MCP_PUBLIC_URL),
     pocketId,
+    oauthStatePath: process.env.MCP_OAUTH_STATE_PATH || "./data/oauth-state.json",
+    oauthTokenTtlS,
     appUrl: process.env.APP_URL || undefined,
     appTitle: process.env.APP_TITLE || undefined,
     defaultModel: process.env.DEFAULT_MODEL || undefined,

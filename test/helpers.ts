@@ -10,6 +10,8 @@ export function makeConfig(overrides: Partial<ServerConfig> = {}): ServerConfig 
     openRouterApiKey: "test-key",
     openRouterBaseUrl: "https://openrouter.ai/api/v1",
     port: 3000,
+    oauthStatePath: "./data/oauth-state.json",
+    oauthTokenTtlS: 2_592_000,
     allowedModels: [],
     blockedModels: [],
     allowFreeModels: true,
