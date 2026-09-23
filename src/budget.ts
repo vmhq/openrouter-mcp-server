@@ -92,17 +92,18 @@ export function resolveBudget(input: BudgetInput, cfg: ServerConfig): Budget | B
     };
   }
 
-  const remainingOverall = Math.max(0, cfg.maxOutputTokens - spent);
+  const remainingOverall = cfg.maxOutputTokens - spent;
+  if (remainingOverall < 1) {
+    return {
+      error:
+        `The overall output budget of ${cfg.maxOutputTokens} tokens (MAX_OUTPUT_TOKENS) ` +
+        `is already used up.`,
+    };
+  }
   const providerCap = modelCompletionCap(model);
   const hardCap = Math.max(
     1,
-    Math.floor(
-      Math.min(
-        providerCap ?? Number.POSITIVE_INFINITY,
-        contextHeadroom,
-        remainingOverall || cfg.maxOutputTokens
-      )
-    )
+    Math.floor(Math.min(providerCap ?? Number.POSITIVE_INFINITY, contextHeadroom, remainingOverall))
   );
 
   let source: Budget["source"] = requested !== undefined ? "requested" : "default";

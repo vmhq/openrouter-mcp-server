@@ -12,6 +12,25 @@ import { makeConfig, makeModel } from "./helpers.js";
 const cfg = makeConfig();
 
 describe("resolveBudget", () => {
+  it("reports an exhausted overall output budget instead of resetting it", () => {
+    const budget = resolveBudget(
+      { model: makeModel(), promptTokens: 100, spentTokens: cfg.maxOutputTokens },
+      cfg
+    );
+    assert.ok("error" in budget);
+    assert.match(budget.error, /MAX_OUTPUT_TOKENS/);
+  });
+
+  it("caps continuation rounds at what is left of the overall budget", () => {
+    const budget = resolveBudget(
+      { model: makeModel(), promptTokens: 100, spentTokens: cfg.maxOutputTokens - 300 },
+      cfg
+    );
+    assert.ok(!("error" in budget));
+    assert.equal(budget.hardCap, 300);
+    assert.equal(budget.maxTokens, 300);
+  });
+
   it("uses DEFAULT_MAX_TOKENS when the caller passes nothing", () => {
     const budget = resolveBudget({ model: makeModel(), promptTokens: 100 }, cfg);
     assert.ok(!("error" in budget));

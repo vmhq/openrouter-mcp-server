@@ -27,7 +27,7 @@ import {
   verifyAccessToken,
   type OAuthConfig,
 } from "./oauth/endpoints.js";
-import { constantTimeEqual } from "./oauth/state.js";
+import { asyncHandler, bearerAuth, errorHandler } from "./http.js";
 
 const cfg = loadConfig();
 const client = new OpenRouterClient(cfg);
@@ -104,28 +104,30 @@ app.post("/oauth/register", (req, res) => registerClient(req, res));
 
 // Interactive authorization: validates the MCP client request, then bounces
 // the browser to PocketID for passkey sign-in.
-app.get("/oauth/authorize", (req, res) => void beginAuthorize(req, res, oauthCfg));
+app.get(
+  "/oauth/authorize",
+  asyncHandler((req, res) => beginAuthorize(req, res, oauthCfg))
+);
 
 // PocketID returns here; we issue our own code back to the MCP client.
-app.get("/oauth/callback", (req, res) => void oauthCallback(req, res, oauthCfg));
+app.get(
+  "/oauth/callback",
+  asyncHandler((req, res) => oauthCallback(req, res, oauthCfg))
+);
 
 // Code → access token exchange (PKCE-verified) and revocation.
 app.post("/oauth/token", (req, res) => exchangeToken(req, res));
 app.post("/oauth/revoke", (req, res) => revokeToken(req, res));
 
-// Bearer protection for /mcp: accepts the static MCP_AUTH_TOKEN (if set) or
-// an OAuth-issued access token. With neither configured, stays open (local use).
-app.use("/mcp", (req, res, next) => {
-  if (!cfg.mcpAuthToken && !oauthEnabled) return next();
-  const auth = req.headers.authorization ?? "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  const isStaticToken =
-    Boolean(cfg.mcpAuthToken) &&
-    token !== "" &&
-    constantTimeEqual(token, cfg.mcpAuthToken as string);
-  if (isStaticToken || verifyAccessToken(token)) return next();
-  sendUnauthorized(oauthCfg, req, res);
-});
+// Bearer protection for /mcp: the static MCP_AUTH_TOKEN and/or OAuth tokens.
+app.use(
+  "/mcp",
+  bearerAuth({
+    staticToken: cfg.mcpAuthToken,
+    verifyToken: oauthEnabled ? (token) => verifyAccessToken(token) !== undefined : undefined,
+    onUnauthorized: (req, res) => sendUnauthorized(oauthCfg, req, res),
+  })
+);
 
 app.post("/mcp", async (req, res) => {
   // Stateless: fresh server+transport per request avoids request-id collisions.
@@ -167,6 +169,8 @@ app.delete("/mcp", methodNotAllowed);
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", server: "openrouter-mcp-server" });
 });
+
+app.use(errorHandler);
 
 app.listen(cfg.port, () => {
   const authModes = [

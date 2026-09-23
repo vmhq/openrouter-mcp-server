@@ -15,7 +15,7 @@
     "test": "npm run typecheck && node --import tsx --test test/*.test.ts"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
