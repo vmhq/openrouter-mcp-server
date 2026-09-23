@@ -59,6 +59,7 @@ export class FakeOpenRouter {
 
   private fetch = async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input.toString());
+    if (url.hostname !== "openrouter.ai") return this.original!(input, init);
     const path = url.pathname.replace(/^\/api\/v1/, "");
     const method = init?.method ?? "GET";
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;

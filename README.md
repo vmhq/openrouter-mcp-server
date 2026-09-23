@@ -163,7 +163,7 @@ MAX_RESPONSE_CHARS=25000
 
 ## Environment variables
 
-See [.env.example](.env.example) — the main ones:
+See [.env.example](.env.example) — the main ones. Values are validated at startup: an invalid one (e.g. `PORT=abc`, `ALLOW_FREE_MODELS=maybe`, or only some of the `POCKETID_*` variables) stops the server with a message naming the variable, instead of silently falling back to the default. Empty variables count as unset.
 
 | Variable | Description |
 |---|---|
