@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ServerConfig } from "../config.js";
 import type { OpenRouterClient } from "../openrouter.js";
 import { ResponseStore } from "../responseStore.js";
@@ -15,10 +15,7 @@ export type { ToolContext } from "./shared.js";
  * stateless per HTTP request, but paged answers must survive until the agent
  * fetches them.
  */
-export function createToolContext(
-  client: OpenRouterClient,
-  cfg: ServerConfig
-): ToolContext {
+export function createToolContext(client: OpenRouterClient, cfg: ServerConfig): ToolContext {
   return { client, cfg, responses: new ResponseStore() };
 }
 

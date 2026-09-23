@@ -129,7 +129,11 @@ export async function exchangePocketIdCode(
 
   if (!res.ok) {
     let detail = "";
-    try { detail = (await res.text()).slice(0, 200); } catch { /* ignore */ }
+    try {
+      detail = (await res.text()).slice(0, 200);
+    } catch {
+      /* ignore */
+    }
     console.error("pocketid_token_exchange_http_error:", res.status, detail);
     return { ok: false, error: `pocketid_token_http_${res.status}` };
   }

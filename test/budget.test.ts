@@ -13,20 +13,14 @@ const cfg = makeConfig();
 
 describe("resolveBudget", () => {
   it("uses DEFAULT_MAX_TOKENS when the caller passes nothing", () => {
-    const budget = resolveBudget(
-      { model: makeModel(), promptTokens: 100 },
-      cfg
-    );
+    const budget = resolveBudget({ model: makeModel(), promptTokens: 100 }, cfg);
     assert.ok(!("error" in budget));
     assert.equal(budget.maxTokens, 4096);
     assert.equal(budget.source, "default");
   });
 
   it("honours an explicit max_tokens that fits", () => {
-    const budget = resolveBudget(
-      { model: makeModel(), promptTokens: 100, requested: 500 },
-      cfg
-    );
+    const budget = resolveBudget({ model: makeModel(), promptTokens: 100, requested: 500 }, cfg);
     assert.ok(!("error" in budget));
     assert.equal(budget.maxTokens, 500);
     assert.equal(budget.source, "requested");
@@ -36,10 +30,7 @@ describe("resolveBudget", () => {
     const model = makeModel({
       supported_parameters: ["reasoning", "max_tokens"],
     });
-    const budget = resolveBudget(
-      { model, promptTokens: 100, requested: 300 },
-      cfg
-    );
+    const budget = resolveBudget({ model, promptTokens: 100, requested: 300 }, cfg);
     assert.ok(!("error" in budget));
     assert.equal(budget.maxTokens, 2000);
     assert.equal(budget.source, "reasoning-floor");
@@ -58,10 +49,7 @@ describe("resolveBudget", () => {
 
   it("clamps to the provider's per-request output cap", () => {
     const model = makeModel({ top_provider: { max_completion_tokens: 1024 } });
-    const budget = resolveBudget(
-      { model, promptTokens: 100, requested: 50_000 },
-      cfg
-    );
+    const budget = resolveBudget({ model, promptTokens: 100, requested: 50_000 }, cfg);
     assert.ok(!("error" in budget));
     assert.equal(budget.maxTokens, 1024);
     assert.equal(budget.hardCap, 1024);
@@ -70,10 +58,7 @@ describe("resolveBudget", () => {
 
   it("clamps to the context window left after the prompt", () => {
     const model = makeModel({ context_length: 8000 });
-    const budget = resolveBudget(
-      { model, promptTokens: 6000, requested: 8000 },
-      cfg
-    );
+    const budget = resolveBudget({ model, promptTokens: 6000, requested: 8000 }, cfg);
     assert.ok(!("error" in budget));
     assert.equal(budget.maxTokens, 8000 - 6000 - 512);
   });

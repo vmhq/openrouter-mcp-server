@@ -1,7 +1,7 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   READ_ONLY_ANNOTATIONS,
-  ToolContext,
+  type ToolContext,
   errorResult,
   jsonResult,
   toErrorMessage,

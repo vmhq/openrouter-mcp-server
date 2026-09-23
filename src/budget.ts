@@ -23,14 +23,9 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
-export function estimateMessageTokens(
-  messages: Array<{ role: string; content: string }>
-): number {
+export function estimateMessageTokens(messages: Array<{ role: string; content: string }>): number {
   // ~4 tokens of framing per message on top of the content itself.
-  return messages.reduce(
-    (sum, m) => sum + estimateTokens(m.content) + 4,
-    0
-  );
+  return messages.reduce((sum, m) => sum + estimateTokens(m.content) + 4, 0);
 }
 
 /**
@@ -77,10 +72,7 @@ export interface BudgetError {
   error: string;
 }
 
-export function resolveBudget(
-  input: BudgetInput,
-  cfg: ServerConfig
-): Budget | BudgetError {
+export function resolveBudget(input: BudgetInput, cfg: ServerConfig): Budget | BudgetError {
   const { model, promptTokens, requested, reasoningEffort } = input;
   const spent = input.spentTokens ?? 0;
   const notes: string[] = [];
@@ -118,8 +110,7 @@ export function resolveBudget(
 
   // Reasoning models burn the budget on hidden tokens first: a caller asking
   // for 300 tokens of prose gets an empty answer. Raise the floor.
-  const reasoningActive =
-    isReasoningModel(model) && reasoningEffort !== "none";
+  const reasoningActive = isReasoningModel(model) && reasoningEffort !== "none";
   if (reasoningActive && want < cfg.reasoningMinMaxTokens) {
     notes.push(
       `raised max_tokens from ${want} to ${cfg.reasoningMinMaxTokens} because '${model.id}' ` +

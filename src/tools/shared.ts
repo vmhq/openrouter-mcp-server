@@ -1,10 +1,10 @@
 import { z } from "zod";
 import type { ServerConfig } from "../config.js";
 import {
-  ChatUsage,
-  OpenRouterClient,
+  type ChatUsage,
+  type OpenRouterClient,
   OpenRouterError,
-  OpenRouterModel,
+  type OpenRouterModel,
   blendedPricePerM,
   estimateCostUsd,
   isDecisionModel,
@@ -31,10 +31,7 @@ export interface ToolResult {
   isError?: boolean;
 }
 
-export function textResult(
-  text: string,
-  structuredContent?: Record<string, unknown>
-): ToolResult {
+export function textResult(text: string, structuredContent?: Record<string, unknown>): ToolResult {
   return {
     content: [{ type: "text", text }],
     ...(structuredContent ? { structuredContent } : {}),
@@ -84,9 +81,7 @@ export function modelSummary(m: OpenRouterModel) {
     blended_price_per_m: round(blendedPricePerM(m), 4),
     supports_tools: supportsTools(m),
     free: isFreeModel(m),
-    modality: isDecisionModel(m)
-      ? "text->decision"
-      : m.architecture?.modality ?? "text->text",
+    modality: isDecisionModel(m) ? "text->decision" : (m.architecture?.modality ?? "text->text"),
   };
 }
 
@@ -138,9 +133,7 @@ export const delegationOptionsSchema = {
   auto_continue: z
     .boolean()
     .default(true)
-    .describe(
-      "Automatically resume and stitch together answers cut off by the token limit"
-    ),
+    .describe("Automatically resume and stitch together answers cut off by the token limit"),
   reasoning_effort: z
     .enum(["none", "low", "medium", "high"])
     .optional()
@@ -186,9 +179,7 @@ function usageAndCost(model: OpenRouterModel, usage: ChatUsage) {
       prompt_tokens: usage.prompt_tokens ?? 0,
       completion_tokens: usage.completion_tokens ?? 0,
       total_tokens: usage.total_tokens ?? 0,
-      ...(reasoningTokens !== undefined
-        ? { reasoning_tokens: reasoningTokens }
-        : {}),
+      ...(reasoningTokens !== undefined ? { reasoning_tokens: reasoningTokens } : {}),
     },
     estimated_cost_usd: cost !== undefined ? round(cost, 6) : undefined,
   };
@@ -216,9 +207,7 @@ export function renderDelegation(
   const stored = oversized ? responses.put(full, outcome.modelUsed) : undefined;
 
   if (outcome.truncated) {
-    notes.push(
-      "the delegated model hit its output limit — the answer below is INCOMPLETE"
-    );
+    notes.push("the delegated model hit its output limit — the answer below is INCOMPLETE");
   }
 
   const output: Record<string, unknown> = {
@@ -245,12 +234,8 @@ export function renderDelegation(
   const footer = [
     `[openrouter] model=${outcome.modelUsed} · finish=${outcome.finishReason}` +
       ` · tokens ${metrics.usage.prompt_tokens} in / ${metrics.usage.completion_tokens} out` +
-      (metrics.estimated_cost_usd !== undefined
-        ? ` · ~$${metrics.estimated_cost_usd}`
-        : "") +
-      (outcome.continuations > 0
-        ? ` · ${outcome.continuations} continuation(s)`
-        : ""),
+      (metrics.estimated_cost_usd !== undefined ? ` · ~$${metrics.estimated_cost_usd}` : "") +
+      (outcome.continuations > 0 ? ` · ${outcome.continuations} continuation(s)` : ""),
     ...notes.map((n) => `[note] ${n}`),
     ...(stored && page
       ? [

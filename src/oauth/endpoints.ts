@@ -24,22 +24,14 @@ import {
   TOKEN_TTL_S,
   type RegisteredClient,
 } from "./state.js";
-import {
-  expandRedirectUris,
-  isRegistrableRedirectUri,
-  redirectUriMatches,
-} from "./redirectUri.js";
+import { expandRedirectUris, isRegistrableRedirectUri, redirectUriMatches } from "./redirectUri.js";
 import {
   buildAuthorizationRedirectUrl,
   renderAuthorizeConsent,
   renderAuthorizeError,
   renderAuthorizeSuccess,
 } from "./views.js";
-import {
-  buildPocketIdAuthUrl,
-  exchangePocketIdCode,
-  type PocketIdConfig,
-} from "./pocketid.js";
+import { buildPocketIdAuthUrl, exchangePocketIdCode, type PocketIdConfig } from "./pocketid.js";
 
 export type OAuthConfig = {
   publicUrl?: string;
@@ -105,7 +97,11 @@ export function protectedResourceMetadata(config: OAuthConfig, req: Request, res
 }
 
 /** RFC 8414 – /.well-known/oauth-authorization-server */
-export function authorizationServerMetadata(config: OAuthConfig, req: Request, res: Response): void {
+export function authorizationServerMetadata(
+  config: OAuthConfig,
+  req: Request,
+  res: Response
+): void {
   const root = baseUrl(config, req);
   res.set(OAUTH_CORS_HEADERS).json({
     issuer: root,
@@ -154,16 +150,19 @@ export function registerClient(req: Request, res: Response): void {
 
   console.error(`oauth_client_registered: ${clientId} (${redirectUris.length} redirect URIs)`);
 
-  res.status(201).set(OAUTH_CORS_HEADERS).json({
-    client_id: clientId,
-    client_id_issued_at: clientIdIssuedAt,
-    redirect_uris: redirectUris,
-    token_endpoint_auth_method: "none",
-    grant_types: ["authorization_code"],
-    response_types: ["code"],
-    scope: "mcp",
-    ...(client.clientName ? { client_name: client.clientName } : {}),
-  });
+  res
+    .status(201)
+    .set(OAUTH_CORS_HEADERS)
+    .json({
+      client_id: clientId,
+      client_id_issued_at: clientIdIssuedAt,
+      redirect_uris: redirectUris,
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code"],
+      response_types: ["code"],
+      scope: "mcp",
+      ...(client.clientName ? { client_name: client.clientName } : {}),
+    });
 }
 
 // ─── GET /oauth/authorize ─────────────────────────────────────────────────────
@@ -174,7 +173,11 @@ export function registerClient(req: Request, res: Response): void {
  * browser to PocketID for the actual user authentication. PocketID returns to
  * GET /oauth/callback once the user signs in.
  */
-export async function beginAuthorize(req: Request, res: Response, config: OAuthConfig): Promise<void> {
+export async function beginAuthorize(
+  req: Request,
+  res: Response,
+  config: OAuthConfig
+): Promise<void> {
   if (!config.pocketId) {
     console.error("oauth_pocketid_not_configured");
     renderAuthorizeError(
@@ -226,7 +229,10 @@ export async function beginAuthorize(req: Request, res: Response, config: OAuthC
   // 2. PKCE: must be S256
   if (!codeChallenge || codeChallengeMethod !== "S256") {
     console.error(`oauth_authorize_invalid_pkce: ${clientId}`);
-    renderAuthorizeError(res, "PKCE validation failed. The client must use the S256 code challenge method.");
+    renderAuthorizeError(
+      res,
+      "PKCE validation failed. The client must use the S256 code challenge method."
+    );
     return;
   }
 
@@ -274,7 +280,11 @@ export async function beginAuthorize(req: Request, res: Response, config: OAuthC
  * code, then issues our own authorization code bound to the original MCP client
  * request and redirects the browser back to the MCP client's redirect URI.
  */
-export async function oauthCallback(req: Request, res: Response, config: OAuthConfig): Promise<void> {
+export async function oauthCallback(
+  req: Request,
+  res: Response,
+  config: OAuthConfig
+): Promise<void> {
   const get = (k: string) => {
     const v = req.query[k];
     return typeof v === "string" ? v : "";
@@ -291,11 +301,17 @@ export async function oauthCallback(req: Request, res: Response, config: OAuthCo
 
   // Single-use: consume the pending transaction immediately
   const pending = pendingAuth.get(txn);
-  if (pending) { pendingAuth.delete(txn); saveState(); }
+  if (pending) {
+    pendingAuth.delete(txn);
+    saveState();
+  }
 
   if (!pending || pending.expiresAt < Date.now()) {
     console.error("oauth_callback_unknown_transaction");
-    renderAuthorizeError(res, "Your sign-in session expired or is invalid. Please try connecting again.");
+    renderAuthorizeError(
+      res,
+      "Your sign-in session expired or is invalid. Please try connecting again."
+    );
     return;
   }
   if (!code) {

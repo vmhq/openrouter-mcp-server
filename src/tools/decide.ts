@@ -1,10 +1,10 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { isDecisionModel, round } from "../openrouter.js";
 import { isAllowedByPolicy, isIdAllowedByLists } from "../selection.js";
 import {
   DELEGATION_ANNOTATIONS,
-  ToolContext,
+  type ToolContext,
   errorResult,
   jsonResult,
   toErrorMessage,
@@ -74,10 +74,7 @@ Returns: {model_used, provider, answers: {name: answer}, usage: {input_tokens, o
           .describe("The material to judge — no questions in here"),
         questions: z
           .record(questionSchema)
-          .refine(
-            (q) => Object.keys(q).length >= 1,
-            "provide at least one question"
-          )
+          .refine((q) => Object.keys(q).length >= 1, "provide at least one question")
           .describe("Map of question name -> typed question"),
       },
       annotations: DELEGATION_ANNOTATIONS,
@@ -86,21 +83,15 @@ Returns: {model_used, provider, answers: {name: answer}, usage: {input_tokens, o
       try {
         const modelId = params.model ?? DEFAULT_DECISION_MODEL;
         // Bare TypeSafe ids ("jev-latest") live under typesafe/ on OpenRouter.
-        const canonicalId = modelId.includes("/")
-          ? modelId
-          : `typesafe/${modelId}`;
+        const canonicalId = modelId.includes("/") ? modelId : `typesafe/${modelId}`;
         const bare = (id: string) => id.replace(/^~/, "");
         // System One models are usually absent from /models; when one is
         // listed, the full policy (price caps included) applies.
         const models = await client.listModels();
         const model = models.find((m) => bare(m.id) === bare(canonicalId));
-        const policy = model
-          ? isAllowedByPolicy(model, cfg)
-          : isIdAllowedByLists(canonicalId, cfg);
+        const policy = model ? isAllowedByPolicy(model, cfg) : isIdAllowedByLists(canonicalId, cfg);
         if (!policy.allowed) {
-          return errorResult(
-            `Model '${modelId}' is not allowed: ${policy.reason}.`
-          );
+          return errorResult(`Model '${modelId}' is not allowed: ${policy.reason}.`);
         }
         if (model && !isDecisionModel(model)) {
           return errorResult(
@@ -122,10 +113,7 @@ Returns: {model_used, provider, answers: {name: answer}, usage: {input_tokens, o
             input_tokens: result.usage?.input_tokens ?? 0,
             output_tokens: result.usage?.output_tokens ?? 0,
           },
-          cost_usd:
-            result.usage?.cost !== undefined
-              ? round(result.usage.cost, 6)
-              : undefined,
+          cost_usd: result.usage?.cost !== undefined ? round(result.usage.cost, 6) : undefined,
         });
       } catch (err) {
         return errorResult(toErrorMessage(err));

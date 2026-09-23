@@ -1,15 +1,11 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import {
-  blendedPricePerM,
-  isFreeModel,
-  supportsTools,
-} from "../openrouter.js";
+import { blendedPricePerM, isFreeModel, supportsTools } from "../openrouter.js";
 import { isAllowedByPolicy } from "../selection.js";
 import { isReasoningModel, modelCompletionCap } from "../budget.js";
 import {
   READ_ONLY_ANNOTATIONS,
-  ToolContext,
+  type ToolContext,
   errorResult,
   jsonResult,
   modelSummary,
@@ -61,10 +57,7 @@ Returns: total/count/offset plus rows of {id, name, context_length, max_completi
           .boolean()
           .default(false)
           .describe("Only models supporting tool/function calling"),
-        include_free: z
-          .boolean()
-          .default(true)
-          .describe("Include free ($0) models"),
+        include_free: z.boolean().default(true).describe("Include free ($0) models"),
         sort: z
           .enum(["price", "context", "newest"])
           .default("price")
@@ -83,16 +76,13 @@ Returns: total/count/offset plus rows of {id, name, context_length, max_completi
         if (params.search) {
           const q = params.search.toLowerCase();
           models = models.filter(
-            (m) =>
-              m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
+            (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)
           );
         }
         if (!params.include_free) models = models.filter((m) => !isFreeModel(m));
         if (params.require_tools) models = models.filter(supportsTools);
         if (params.min_context !== undefined) {
-          models = models.filter(
-            (m) => (m.context_length ?? 0) >= (params.min_context ?? 0)
-          );
+          models = models.filter((m) => (m.context_length ?? 0) >= (params.min_context ?? 0));
         }
         if (params.max_blended_price_per_m !== undefined) {
           models = models.filter(
@@ -152,11 +142,7 @@ Args:
 
 Returns: the model record plus {is_reasoning_model, allowed_by_policy, policy_reason}.`,
       inputSchema: {
-        model: z
-          .string()
-          .min(1)
-          .max(200)
-          .describe("Exact model id, e.g. 'deepseek/deepseek-chat'"),
+        model: z.string().min(1).max(200).describe("Exact model id, e.g. 'deepseek/deepseek-chat'"),
       },
       annotations: READ_ONLY_ANNOTATIONS,
     },

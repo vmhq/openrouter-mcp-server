@@ -119,7 +119,9 @@ app.use("/mcp", (req, res, next) => {
   if (!cfg.mcpAuthToken && !oauthEnabled) return next();
   const auth = req.headers.authorization ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  const isStaticToken = Boolean(cfg.mcpAuthToken) && token !== "" &&
+  const isStaticToken =
+    Boolean(cfg.mcpAuthToken) &&
+    token !== "" &&
     constantTimeEqual(token, cfg.mcpAuthToken as string);
   if (isStaticToken || verifyAccessToken(token)) return next();
   sendUnauthorized(oauthCfg, req, res);

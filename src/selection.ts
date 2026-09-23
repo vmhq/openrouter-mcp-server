@@ -1,6 +1,6 @@
 import type { ServerConfig } from "./config.js";
 import {
-  OpenRouterModel,
+  type OpenRouterModel,
   blendedPricePerM,
   isDecisionModel,
   isFreeModel,
@@ -34,10 +34,7 @@ export function isIdAllowedByLists(
   if (cfg.blockedModels.some((e) => matchesEntry(modelId, e))) {
     return { allowed: false, reason: "blocked by BLOCKED_MODELS in .env" };
   }
-  if (
-    cfg.allowedModels.length > 0 &&
-    !cfg.allowedModels.some((e) => matchesEntry(modelId, e))
-  ) {
+  if (cfg.allowedModels.length > 0 && !cfg.allowedModels.some((e) => matchesEntry(modelId, e))) {
     return { allowed: false, reason: "not in ALLOWED_MODELS in .env" };
   }
   return { allowed: true };
@@ -77,15 +74,9 @@ export function isAllowedByPolicy(
   return { allowed: true };
 }
 
-export function meetsRequirements(
-  model: OpenRouterModel,
-  req: ModelRequirements
-): boolean {
+export function meetsRequirements(model: OpenRouterModel, req: ModelRequirements): boolean {
   if (req.requireTools && !supportsTools(model)) return false;
-  if (
-    req.minContext !== undefined &&
-    (model.context_length ?? 0) < req.minContext
-  ) {
+  if (req.minContext !== undefined && (model.context_length ?? 0) < req.minContext) {
     return false;
   }
   if (req.textOutputOnly) {
@@ -156,9 +147,7 @@ export function pickModelForTier(
     let candidates = eligible.filter((m) => inBand(m, bands[band]));
     if (candidates.length === 0) continue;
 
-    const preferredCandidates = candidates.filter((m) =>
-      preferred.has(providerOf(m.id))
-    );
+    const preferredCandidates = candidates.filter((m) => preferred.has(providerOf(m.id)));
     if (preferredCandidates.length > 0) candidates = preferredCandidates;
 
     // economy/balanced: cheapest wins; quality: highest price within cap wins.
@@ -177,12 +166,8 @@ export function pickModelForTier(
       model: chosen,
       reason:
         `Selected from ${note}, ` +
-        (tier === "quality"
-          ? "highest-priced candidate within the cap"
-          : "cheapest candidate") +
-        (preferred.has(providerOf(chosen.id))
-          ? ", from preferred providers"
-          : ""),
+        (tier === "quality" ? "highest-priced candidate within the cap" : "cheapest candidate") +
+        (preferred.has(providerOf(chosen.id)) ? ", from preferred providers" : ""),
       candidatesConsidered: eligible.length,
       runnersUp: candidates.slice(1, 4).map((m) => ({
         id: m.id,

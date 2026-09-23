@@ -90,7 +90,10 @@ export function isDecisionModel(model: OpenRouterModel): boolean {
 }
 
 export class OpenRouterError extends Error {
-  constructor(message: string, public status?: number) {
+  constructor(
+    message: string,
+    public status?: number
+  ) {
     super(message);
     this.name = "OpenRouterError";
   }
@@ -106,17 +109,11 @@ export function pricePerM(perToken: string | undefined): number {
 
 /** Blended $/M used for ranking: input weighs more in typical delegation. */
 export function blendedPricePerM(model: OpenRouterModel): number {
-  return (
-    0.7 * pricePerM(model.pricing.prompt) +
-    0.3 * pricePerM(model.pricing.completion)
-  );
+  return 0.7 * pricePerM(model.pricing.prompt) + 0.3 * pricePerM(model.pricing.completion);
 }
 
 export function isFreeModel(model: OpenRouterModel): boolean {
-  return (
-    pricePerM(model.pricing.prompt) === 0 &&
-    pricePerM(model.pricing.completion) === 0
-  );
+  return pricePerM(model.pricing.prompt) === 0 && pricePerM(model.pricing.completion) === 0;
 }
 
 export function supportsTools(model: OpenRouterModel): boolean {
@@ -128,10 +125,8 @@ export function estimateCostUsd(
   usage: ChatUsage | undefined
 ): number | undefined {
   if (!usage) return undefined;
-  const promptCost =
-    (usage.prompt_tokens ?? 0) * Number(model.pricing.prompt ?? "0");
-  const completionCost =
-    (usage.completion_tokens ?? 0) * Number(model.pricing.completion ?? "0");
+  const promptCost = (usage.prompt_tokens ?? 0) * Number(model.pricing.prompt ?? "0");
+  const completionCost = (usage.completion_tokens ?? 0) * Number(model.pricing.completion ?? "0");
   return promptCost + completionCost;
 }
 
@@ -147,8 +142,7 @@ export function round(n: number, decimals = 4): number {
 // ---------- Client ----------
 
 export class OpenRouterClient {
-  private modelsCache: { models: OpenRouterModel[]; fetchedAt: number } | null =
-    null;
+  private modelsCache: { models: OpenRouterModel[]; fetchedAt: number } | null = null;
   /** De-duplicates concurrent catalog refreshes across parallel MCP requests. */
   private modelsInFlight: Promise<OpenRouterModel[]> | null = null;
 
@@ -195,10 +189,7 @@ export class OpenRouterClient {
     init?: { method?: string; body?: unknown; timeoutMs?: number }
   ): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      init?.timeoutMs ?? 120_000
-    );
+    const timeout = setTimeout(() => controller.abort(), init?.timeoutMs ?? 120_000);
     let res: Response;
     try {
       res = await fetch(`${this.cfg.openRouterBaseUrl}${path}`, {
@@ -214,9 +205,7 @@ export class OpenRouterClient {
         );
       }
       throw new OpenRouterError(
-        `Network error reaching OpenRouter: ${
-          err instanceof Error ? err.message : String(err)
-        }`
+        `Network error reaching OpenRouter: ${err instanceof Error ? err.message : String(err)}`
       );
     } finally {
       clearTimeout(timeout);
@@ -292,9 +281,7 @@ export class OpenRouterClient {
     return models.find((m) => m.id === id);
   }
 
-  async chatCompletion(
-    params: ChatCompletionParams
-  ): Promise<ChatCompletionResult> {
+  async chatCompletion(params: ChatCompletionParams): Promise<ChatCompletionResult> {
     interface RawResponse {
       id: string;
       model: string;
@@ -316,17 +303,13 @@ export class OpenRouterClient {
     if (params.jsonMode) body.response_format = { type: "json_object" };
     if (params.reasoningEffort) {
       body.reasoning =
-        params.reasoningEffort === "none"
-          ? { enabled: false }
-          : { effort: params.reasoningEffort };
+        params.reasoningEffort === "none" ? { enabled: false } : { effort: params.reasoningEffort };
     }
     if (params.webSearch) {
       body.plugins = [
         {
           id: "web",
-          ...(params.webMaxResults !== undefined
-            ? { max_results: params.webMaxResults }
-            : {}),
+          ...(params.webMaxResults !== undefined ? { max_results: params.webMaxResults } : {}),
         },
       ];
     }

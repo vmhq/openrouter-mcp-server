@@ -3,7 +3,11 @@ import type { Response as ExpressResponse } from "express";
 import { canonicalRedirectUri, isRegistrableRedirectUri } from "./redirectUri.js";
 
 function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 const FORM_SECURITY_HEADERS = {
@@ -28,7 +32,10 @@ function sendHtml(
   html: string,
   headers: Record<string, string> = FORM_SECURITY_HEADERS
 ): void {
-  res.status(status).set({ "Content-Type": "text/html; charset=utf-8", ...headers }).send(html);
+  res
+    .status(status)
+    .set({ "Content-Type": "text/html; charset=utf-8", ...headers })
+    .send(html);
 }
 
 /**
@@ -97,7 +104,11 @@ export function renderAuthorizeConsent(
   sendHtml(res, 200, html);
 }
 
-export function buildAuthorizationRedirectUrl(redirectUri: string, code: string, state: string): string {
+export function buildAuthorizationRedirectUrl(
+  redirectUri: string,
+  code: string,
+  state: string
+): string {
   const target = canonicalRedirectUri(redirectUri);
   const redirect = new URL(target);
   redirect.searchParams.set("code", code);

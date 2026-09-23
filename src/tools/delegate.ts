@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
   OpenRouterError,
@@ -11,8 +11,8 @@ import { DelegationError, runDelegation } from "../completion.js";
 import {
   DELEGATION_ANNOTATIONS,
   READ_ONLY_ANNOTATIONS,
-  ToolContext,
-  ToolResult,
+  type ToolContext,
+  type ToolResult,
   buildMessages,
   delegationOptionsSchema,
   errorResult,
@@ -27,10 +27,7 @@ const BUDGET_NOTE = `Output budget: you do NOT need to size max_tokens. The serv
 
 Long answers: if the answer is larger than this server's inline limit you get the first page plus a response_id; fetch the remainder with openrouter_fetch_response.`;
 
-export function registerDelegationTools(
-  server: McpServer,
-  ctx: ToolContext
-): void {
+export function registerDelegationTools(server: McpServer, ctx: ToolContext): void {
   const { client, cfg, responses } = ctx;
 
   async function delegate(
@@ -213,16 +210,16 @@ Returns: the answer as text, plus {model_used, selection_reason, runners_up, fin
           } catch (err) {
             lastError = err;
             const retriable =
-              err instanceof OpenRouterError &&
-              err.status === 404 &&
-              i < candidates.length - 1;
+              err instanceof OpenRouterError && err.status === 404 && i < candidates.length - 1;
             if (!retriable) throw err;
           }
         }
-        throw lastError ??
+        throw (
+          lastError ??
           new Error(
             "No candidate model has endpoints matching your OpenRouter data policy (see openrouter.ai/settings/privacy)."
-          );
+          )
+        );
       } catch (err) {
         if (err instanceof DelegationError) return errorResult(err.message);
         return errorResult(toErrorMessage(err));

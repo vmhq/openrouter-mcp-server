@@ -152,10 +152,7 @@ export function saveState(): void {
     chmodSync(tmp, 0o600); // covers the case where a loose tmp file already existed
     renameSync(tmp, STATE_PATH);
   } catch (err) {
-    console.error(
-      "oauth_state_persist_failed:",
-      err instanceof Error ? err.message : String(err)
-    );
+    console.error("oauth_state_persist_failed:", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -163,19 +160,33 @@ export function pruneExpiredOAuthState(now = Date.now()): void {
   let dirty = false;
 
   for (const [code, ac] of codes) {
-    if (ac.expiresAt <= now) { codes.delete(code); dirty = true; }
+    if (ac.expiresAt <= now) {
+      codes.delete(code);
+      dirty = true;
+    }
   }
   for (const [txn, p] of pendingAuth) {
-    if (p.expiresAt <= now) { pendingAuth.delete(txn); dirty = true; }
+    if (p.expiresAt <= now) {
+      pendingAuth.delete(txn);
+      dirty = true;
+    }
   }
   for (const [hash, tok] of accessTokens) {
-    if (tok.expiresAt <= now) { accessTokens.delete(hash); dirty = true; }
+    if (tok.expiresAt <= now) {
+      accessTokens.delete(hash);
+      dirty = true;
+    }
   }
   for (const [id, client] of clients) {
     // Guard against a non-finite timestamp so the comparison can't silently
     // evaluate to false and keep a client alive forever.
-    const issuedAtMs = Number.isFinite(client.clientIdIssuedAt) ? client.clientIdIssuedAt * 1000 : 0;
-    if (issuedAtMs + CLIENT_TTL_MS <= now) { clients.delete(id); dirty = true; }
+    const issuedAtMs = Number.isFinite(client.clientIdIssuedAt)
+      ? client.clientIdIssuedAt * 1000
+      : 0;
+    if (issuedAtMs + CLIENT_TTL_MS <= now) {
+      clients.delete(id);
+      dirty = true;
+    }
   }
 
   if (dirty) saveState();

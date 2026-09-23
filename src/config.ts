@@ -93,9 +93,10 @@ export function loadConfig(): ServerConfig {
 
   return {
     openRouterApiKey: apiKey,
-    openRouterBaseUrl: (
-      process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1"
-    ).replace(/\/$/, ""),
+    openRouterBaseUrl: (process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1").replace(
+      /\/$/,
+      ""
+    ),
     port: parseOptionalNumber(process.env.PORT) ?? 3000,
     mcpAuthToken: process.env.MCP_AUTH_TOKEN || undefined,
     publicUrl: normalizePublicUrl(process.env.MCP_PUBLIC_URL),
@@ -104,32 +105,22 @@ export function loadConfig(): ServerConfig {
     appTitle: process.env.APP_TITLE || undefined,
     defaultModel: process.env.DEFAULT_MODEL || undefined,
     maxPromptPricePerM: parseOptionalNumber(process.env.MAX_PROMPT_PRICE_PER_M),
-    maxCompletionPricePerM: parseOptionalNumber(
-      process.env.MAX_COMPLETION_PRICE_PER_M
-    ),
+    maxCompletionPricePerM: parseOptionalNumber(process.env.MAX_COMPLETION_PRICE_PER_M),
     allowedModels: parseList(process.env.ALLOWED_MODELS),
     blockedModels: parseList(process.env.BLOCKED_MODELS),
-    allowFreeModels:
-      (process.env.ALLOW_FREE_MODELS ?? "true").toLowerCase() !== "false",
+    allowFreeModels: (process.env.ALLOW_FREE_MODELS ?? "true").toLowerCase() !== "false",
     preferredProviders: parseList(
       process.env.PREFERRED_PROVIDERS ??
         "openai,anthropic,google,meta-llama,mistralai,deepseek,qwen,x-ai,amazon"
     ),
-    tierEconomyMaxPrice:
-      parseOptionalNumber(process.env.TIER_ECONOMY_MAX_PRICE) ?? 0.5,
-    tierBalancedMaxPrice:
-      parseOptionalNumber(process.env.TIER_BALANCED_MAX_PRICE) ?? 3,
-    tierQualityMaxPrice:
-      parseOptionalNumber(process.env.TIER_QUALITY_MAX_PRICE) ?? 15,
-    modelsCacheTtlMs:
-      (parseOptionalNumber(process.env.MODELS_CACHE_TTL_SECONDS) ?? 300) * 1000,
-    defaultMaxTokens:
-      parseOptionalNumber(process.env.DEFAULT_MAX_TOKENS) ?? 4096,
-    reasoningMinMaxTokens:
-      parseOptionalNumber(process.env.REASONING_MIN_MAX_TOKENS) ?? 2000,
+    tierEconomyMaxPrice: parseOptionalNumber(process.env.TIER_ECONOMY_MAX_PRICE) ?? 0.5,
+    tierBalancedMaxPrice: parseOptionalNumber(process.env.TIER_BALANCED_MAX_PRICE) ?? 3,
+    tierQualityMaxPrice: parseOptionalNumber(process.env.TIER_QUALITY_MAX_PRICE) ?? 15,
+    modelsCacheTtlMs: (parseOptionalNumber(process.env.MODELS_CACHE_TTL_SECONDS) ?? 300) * 1000,
+    defaultMaxTokens: parseOptionalNumber(process.env.DEFAULT_MAX_TOKENS) ?? 4096,
+    reasoningMinMaxTokens: parseOptionalNumber(process.env.REASONING_MIN_MAX_TOKENS) ?? 2000,
     maxOutputTokens: parseOptionalNumber(process.env.MAX_OUTPUT_TOKENS) ?? 32_000,
     maxContinuations: parseOptionalNumber(process.env.MAX_CONTINUATIONS) ?? 3,
-    maxResponseChars:
-      parseOptionalNumber(process.env.MAX_RESPONSE_CHARS) ?? 25_000,
+    maxResponseChars: parseOptionalNumber(process.env.MAX_RESPONSE_CHARS) ?? 25_000,
   };
 }
